@@ -19,7 +19,8 @@
     "dev": "vite",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx test/fixtures.test.ts"
+    "test": "tsx test/fixtures.test.ts",
+    "start": "./dev.sh"
   },
   "devDependencies": {
     "@types/node": "^26.6.3",

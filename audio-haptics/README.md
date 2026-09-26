@@ -165,8 +165,33 @@ Haptic pattern meanings and timings: [`contracts/haptic-patterns.md`](../contrac
 ## Harness
 
 ```bash
+npm start                  # starts Vite and opens a browser that can speak
+```
+
+Or by hand:
+
+```bash
 npm run dev -- --host      # then open http://<laptop-ip>:5173 on the phone
 ```
+
+### Desktop speech needs a flag
+
+**Chrome on Linux reports ZERO SpeechSynthesis voices by default** and `speak()`
+becomes a silent no-op — no error, all events still fire. Chrome disables
+speech-dispatcher unless told otherwise:
+
+```bash
+google-chrome --enable-speech-dispatcher http://localhost:5173
+```
+
+Measured on the dev machine: 0 voices without the flag, 14,824 with it. Firefox
+reaches speech-dispatcher unflagged. Electron shells (including editor preview
+panes) always report zero and cannot be fixed. **Android Chrome needs none of
+this** — the phone, which is the actual target, is the easy platform.
+
+Press **Run diagnostic** in the harness on any new machine. It measures the real
+output signal level, counts voices, names the chosen voice and checks the
+Vibration API, so a silent demo is caught in two seconds instead of on stage.
 
 Fetches `GET /extract/mock?scenario=…` from the backend at
 `http://<same-host>:8000`, so it exercises the real contract rather than
