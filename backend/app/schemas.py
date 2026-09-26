@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class XAxis(BaseModel):
@@ -26,6 +26,12 @@ class GraphData(BaseModel):
     series: list[Series]
     summary: str | None = None
     confidence: float
+
+    @field_validator("confidence")
+    @classmethod
+    def _clamp_confidence(cls, v: float) -> float:
+        # Clamp rather than reject: an LLM returning 1.02 shouldn't crash the whole extraction.
+        return min(max(v, 0.0), 1.0)
 
 
 class FieldConfidence(BaseModel):
