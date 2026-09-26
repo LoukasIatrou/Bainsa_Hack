@@ -39,6 +39,13 @@ interface ExplorerDeps {
   getFieldConfidence: () => FieldConfidence | null;
   /** Person 2's analysis, when /reason has been called. Null falls back to local phrasing. */
   getReasoning: () => ReasoningResponse | null;
+  /**
+   * Concise readouts drop the "Point 3 of 5" suffix, matching
+   * docs/phone-demo-navigation.md 2 ("{x-label}, {value}{unit}"). During fast
+   * swiping the suffix is cut off by the next interrupt anyway, so it costs
+   * nothing and shortens every utterance.
+   */
+  isConcise: () => boolean;
 }
 
 export class Explorer {
@@ -203,6 +210,10 @@ export class Explorer {
     if (!series) return;
 
     const analysis = this.reasoningPoint();
+    // Emit the new index BEFORE the pattern. Consumers that key both the ring
+    // dot and the pulse flash off one index would otherwise briefly render the
+    // new pattern at the previous angle.
+    this.emitFocus(graph);
     this.deps.haptics.play(options.pattern ?? this.patternForCurrent(graph, analysis));
     this.deps.sonifier.sonifyPoint(graph, this.seriesIndex, this.pointIndex, {
       // Person 2 normalises across every series, so pitches stay comparable
@@ -213,12 +224,13 @@ export class Explorer {
     // Prefer Person 2's ready-to-speak readout -- it carries the delta
     // ("up 5 from February") that a locally generated one cannot know.
     const readout = analysis?.readout
-      ?? describePoint(graph, this.seriesIndex, this.pointIndex, this.deps.getFieldConfidence());
+      ?? describePoint(graph, this.seriesIndex, this.pointIndex, this.deps.getFieldConfidence(), {
+        includePosition: !this.deps.isConcise(),
+      });
     const text = options.prefix ? `${options.prefix} ${readout}` : readout;
     // 'interrupt' so holding an arrow key always speaks the point under the
     // cursor now, instead of working through a backlog.
     this.deps.speech.speak(text, 'interrupt');
-    this.emitFocus(graph);
   }
 
   private patternForCurrent(

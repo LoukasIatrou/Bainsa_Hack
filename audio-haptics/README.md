@@ -80,6 +80,60 @@ demo still runs if `/reason` is down. `setGraph` and `handleExtraction` both
 clear stale reasoning — call `setReasoning` again after any user correction,
 since `/reason` has to be re-run anyway.
 
+## Phone integration (Person 4)
+
+Per `docs/phone-demo-navigation.md`: a native `<input type="range">` drives an
+index, and speech, vibration and the ring all key off it.
+
+```tsx
+<input type="range" min={0} max={length - 1} step={1}
+       onInput={(e) => engine.exploreIndex(e.currentTarget.valueAsNumber)} />
+```
+
+`exploreIndex` cancels-then-speaks (doc 2), fires the matching vibration
+pattern and emits the ring state, from one call.
+
+### Ring simulator
+
+```tsx
+import { createRingBinding, RING_PATTERN_LABELS } from '@bainsa/audio-haptics';
+import type { RingState } from '@bainsa/audio-haptics';
+
+const [ring, setRing] = useState<RingState | null>(null);
+useEffect(() => createRingBinding(engine, setRing), [engine]);
+
+<RingSimulator index={ring.index} length={ring.length} direction={ring.direction} />
+```
+
+`RingState` carries everything both layers need: `index`, `length`, `angle`
+(already `index / (length - 1) * 360`), `pattern`, `label`, `timings`, `ramp`,
+`vibrated` and a ready-to-render `status` string.
+
+**It works with `RingSimulator` unchanged** — `ring.direction` is pre-degraded
+onto the existing `'rising' | 'falling' | 'flat' | 'unknown'` prop.
+
+**But two of the five patterns cannot survive that**: `double` (a peak or
+trough) and `long` (a boundary or unreadable point) both collapse to
+`'unknown'`, and those are the moments most worth feeling. Doc 4 says the flash
+"mirrors whichever of the 5 named patterns just fired", so the upgrade is to
+widen the prop:
+
+```ts
+- export type PullDirection = 'rising' | 'falling' | 'flat' | 'unknown'
++ import type { HapticPatternName } from '@bainsa/audio-haptics'
++ export type PullDirection = HapticPatternName   // short | double | long | rising | falling
+```
+
+then pass `ring.pattern` instead of `ring.direction`, and use
+`RING_PATTERN_LABELS` for the aria-live text. Five CSS classes instead of four.
+
+One `RingState` is emitted per index change, not one per event, so the dot and
+the flash can never disagree about which point they are showing.
+
+`status` says **"vibration requested"**, never "vibrating": desktop Chrome
+exposes `navigator.vibrate` and silently does nothing, with no way to detect
+the difference, and doc 4 forbids the ring implying hardware it cannot confirm.
+
 ## Explore page: the four buttons
 
 The Explore page is driven by touch — the user drags a finger over the chart and

@@ -66,6 +66,12 @@ export interface EngineOptions {
   audioTactile?: boolean;
   /** Initial speech rate, 0.5-2.0. */
   rate?: number;
+  /**
+   * Point readouts as "{x-label}, {value}{unit}" with no "Point 3 of 5"
+   * suffix, per docs/phone-demo-navigation.md 2. Default true -- the suffix is
+   * cut off by the next interrupt during fast swiping regardless.
+   */
+  conciseReadouts?: boolean;
 }
 
 export class AudioHapticEngine {
@@ -81,9 +87,11 @@ export class AudioHapticEngine {
   private extractionStatus: ExtractionStatus | null = null;
   private reasoning: ReasoningResponse | null = null;
   private lastSonifyOptions: SonifyOptions = {};
+  private concise: boolean;
 
   constructor(options: EngineOptions = {}) {
     const emit = (event: EngineEvent) => this.dispatch(event);
+    this.concise = options.conciseReadouts !== false;
 
     this.speech = new SpeechQueue(emit);
     this.sonifier = new Sonifier(emit);
@@ -104,6 +112,7 @@ export class AudioHapticEngine {
       getGraph: () => this.graph,
       getFieldConfidence: () => this.fieldConfidence,
       getReasoning: () => this.reasoning,
+      isConcise: () => this.concise,
     });
 
     this.guidance = new Guidance({
@@ -212,6 +221,28 @@ export class AudioHapticEngine {
    */
   guide(x: number, y: number): GuidanceReading {
     return this.guidance.update(x, y);
+  }
+
+  /**
+   * The single entry point for Person 4's exploration slider.
+   *
+   * docs/phone-demo-navigation.md 1 maps finger movement to a data index via a
+   * native `<input type="range">`, so its `input` event drives speech, the
+   * vibration pulse and the ring from one place:
+   *
+   *   <input type="range" min="0" max={length - 1} step="1"
+   *          onInput={(e) => engine.exploreIndex(e.currentTarget.valueAsNumber)} />
+   *
+   * Speech uses `interrupt`, which cancels before speaking exactly as 2
+   * requires, so fast swiping never builds a backlog of stale utterances.
+   */
+  exploreIndex(index: number): void {
+    this.explore.focus(index);
+  }
+
+  /** Whether readouts omit the "Point 3 of 5" suffix. */
+  setConciseReadouts(concise: boolean): void {
+    this.concise = concise;
   }
 
   /** Fired when the finger actually lands on the point it was steered toward. */
@@ -665,6 +696,13 @@ export { SpeechQueue, chunkText } from './speech.js';
 export { Sonifier } from './sonification.js';
 export { Explorer } from './explorer.js';
 export { Guidance, fromPointerEvent } from './guidance.js';
+export {
+  RING_PATTERN_LABELS,
+  createRingBinding,
+  ringAngle,
+  toLegacyDirection,
+} from './ring.js';
+export type { RingState } from './ring.js';
 export type { GuidanceReading, GuidanceState } from './guidance.js';
 export {
   LOW_CONFIDENCE,
