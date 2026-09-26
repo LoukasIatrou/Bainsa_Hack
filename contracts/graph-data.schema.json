@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GraphData",
+  "description": "Shared graph representation. Same shape for mocked data, live extraction, controlled uploads, and cached fallback results.",
+  "type": "object",
+  "required": ["graphType", "title", "xAxis", "yAxis", "series", "confidence"],
+  "properties": {
+    "graphType": { "type": "string", "enum": ["line", "bar", "scatter", "pie"] },
+    "title": { "type": "string" },
+    "xAxis": {
+      "type": "object",
+      "required": ["label", "values"],
+      "properties": {
+        "label": { "type": "string" },
+        "values": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "yAxis": {
+      "type": "object",
+      "required": ["label"],
+      "properties": {
+        "label": { "type": "string" },
+        "unit": { "type": ["string", "null"] }
+      }
+    },
+    "series": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "values"],
+        "properties": {
+          "name": { "type": "string" },
+          "values": {
+            "type": "array",
+            "description": "Aligned with xAxis.values by index. null means the value could not be read.",
+            "items": { "type": ["number", "null"] }
+          }
+        }
+      }
+    },
+    "summary": { "type": ["string", "null"] },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Overall extraction confidence. Illustrative only, not a verified probability of correctness."
+    }
+  }
+}

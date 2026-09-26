@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExtractionResponse",
+  "description": "Response envelope returned by Person 1's /extract endpoint. Wraps GraphData with status and per-field confidence so the frontend can trigger the confirmation/correction flow instead of trusting extraction silently.",
+  "type": "object",
+  "required": ["status"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["ok", "low_confidence", "error"],
+      "description": "ok: safe to show without warning. low_confidence: show confirmation/correction UI before Overview. error: extraction failed, prompt retake/upload."
+    },
+    "graph": {
+      "description": "Present when status is ok or low_confidence. Shape defined in graph-data.schema.json.",
+      "$ref": "./graph-data.schema.json"
+    },
+    "fieldConfidence": {
+      "type": ["object", "null"],
+      "description": "Per-field confidence (0-1) for graphType, title, xAxis, yAxis, series, used to highlight which specific fields need user confirmation.",
+      "properties": {
+        "graphType": { "type": "number" },
+        "title": { "type": "number" },
+        "xAxis": { "type": "number" },
+        "yAxis": { "type": "number" },
+        "series": { "type": "number" }
+      }
+    },
+    "message": {
+      "type": ["string", "null"],
+      "description": "Human-readable reason for low_confidence or error status, e.g. 'y-axis unit unreadable' or 'no chart detected in image'."
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "status": "low_confidence",
+  "graph": {
+    "graphType": "bar",
+    "title": "Quarterly Revenue",
+    "xAxis": {
+      "label": "Quarter",
+      "values": ["Q1", "Q2", "Q3", "Q4"]
+    },
+    "yAxis": {
+      "label": "Revenue",
+      "unit": null
+    },
+    "series": [
+      {
+        "name": "Revenue",
+        "values": [120, 145, null, 210]
+      }
+    ],
+    "summary": "Revenue appears to increase overall, but one value could not be read.",
+    "confidence": 0.52
+  },
+  "fieldConfidence": {
+    "graphType": 0.9,
+    "title": 0.85,
+    "xAxis": 0.88,
+    "yAxis": 0.4,
+    "series": 0.5
+  },
+  "message": "Y-axis unit is cropped from the image and the Q3 bar is partially obscured."
+}

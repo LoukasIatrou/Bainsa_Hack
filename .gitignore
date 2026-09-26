@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.env
+
+# Node / frontend (added when Person 4's app lands)
+node_modules/
+dist/
+
+# Editors / OS
+.DS_Store
+.vscode/
