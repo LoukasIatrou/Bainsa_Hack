@@ -46,9 +46,11 @@ export function SpiderSense({ curve, width, height, radius: radiusPx = 60, guide
   const [unitsPerPx, setUnitsPerPx] = useState(1)
   const radius = radiusPx * unitsPerPx
   const radiusRef = useRef(radius)
-  radiusRef.current = radius
   const guideRef = useRef(guideTo)
-  guideRef.current = guideTo
+  useEffect(() => {
+    radiusRef.current = radius
+    guideRef.current = guideTo
+  }, [radius, guideTo])
   // Only the first finger drives the circle; a second touch (palm, other hand) is ignored.
   const activePointer = useRef<number | null>(null)
   const pulseRef = useRef<SVGCircleElement>(null)
