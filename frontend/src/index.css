@@ -596,3 +596,11 @@ body {
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+/* Where Next point / Maximum / Minimum is guiding to (the red circle is the current point). */
+.explore__goal {
+  fill: none;
+  stroke: #ffd400;
+  stroke-width: 2.5;
+  stroke-dasharray: 5 4;
+}

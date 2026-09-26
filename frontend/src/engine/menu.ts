@@ -13,6 +13,22 @@ function stopWalk(): void {
   engine.stopExplainMode()
 }
 
+// Person 2's explanation for a point of the current line ('2020, 8.1 percent. The highest point,
+// up 4.4 percentage points from 2019; after this it falls.'), or Person 3's own wording without
+// /reason. The engine's reasoning object is the /reason JSON; its type just omits `explain`.
+export function explainPoint(index: number): void {
+  const graph = engine.getGraph()
+  if (!graph) return
+  const series = graph.series[engine.explore.currentSeries] ?? graph.series[0]
+  const reasoning = engine.getReasoning() as unknown as {
+    series?: { name: string; points: { index: number; explain?: string }[] }[]
+  } | null
+  const text = reasoning?.series?.find((s) => s.name === series.name)?.points.find((p) => p.index === index)?.explain
+  engine.explore.focus(index, { announce: false })
+  if (text) engine.speech.speak(text, 'interrupt')
+  else engine.explain()
+}
+
 export function runOverview(): void {
   stopWalk()
   engine.setMode('graph')
@@ -100,7 +116,7 @@ export function installMenu(onStartOver: () => void): void {
       available: hasGraph,
       activate: () => {
         engine.setMode('graph')
-        engine.explain()
+        explainPoint(engine.explore.currentPoint)
       },
     },
     { id: 'max', label: 'Maximum', hint: 'Where is the highest value?', available: hasGraph, activate: () => runAsk('max') },

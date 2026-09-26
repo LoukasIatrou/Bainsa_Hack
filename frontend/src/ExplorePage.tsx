@@ -3,7 +3,7 @@ import { engine, fromPointerEvent, normalise, pointCount, valueRange } from './e
 import type { EngineStatus } from './engine'
 import type { PlotBox } from './engine/curve'
 import { lineRuns, runsCurve, runsPath } from './engine/line'
-import { installMenu, installWalkGuard } from './engine/menu'
+import { explainPoint, installMenu, installWalkGuard } from './engine/menu'
 import { EngineRing } from './spiderSense/EngineRing'
 import { INITIAL_STATE, stepSpiderSense } from './spiderSense/logic'
 import type { Curve, Point, SpiderSenseState } from './spiderSense/logic'
@@ -21,6 +21,8 @@ interface ExplorePageProps {
   // Person 2's /reason, called once the plot is measured so chartAspect is the real one.
   fetchReasoning?: (chartAspect: number) => Promise<ReasoningResponse>
   source: GraphSource
+  // Spoken before the title on arrival (e.g. a low-confidence warning).
+  notice?: string
   onReset: () => void
   onSliderMode: () => void
 }
@@ -32,10 +34,11 @@ const PAD = { left: 38, right: 24, top: 36, bottom: 34 }
 const SOURCE_LABEL: Record<GraphSource, string> = { live: 'live capture', controlled: 'uploaded image', saved: 'cached extraction' }
 
 // The Explore screen. Graph mode: the framed graph; the pointer (mouse or finger) is the simulated
-// ring, which first points to the START of the line, then along it to the end. Menu mode: a full
-// screen list of actions (Person 3's menu: swipe to move, tap to choose). Two-finger tap, a
-// right-click or the M key switches modes. Every sound and buzz comes from Person 3's engine.
-export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning, source, onReset, onSliderMode }: ExplorePageProps) {
+// ring, which first points to the START of the line, then along it to the end; each point is
+// explained when the finger reaches it, and the red circle marks that current point. Menu mode: a
+// full screen list of actions (swipe to move, tap to choose). A double-tap switches modes (laptop:
+// double-click, right-click or M). Every sound and buzz comes from Person 3's engine.
+export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning, source, notice = '', onReset, onSliderMode }: ExplorePageProps) {
   const bodyRef = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const plotRef = useRef<HTMLDivElement>(null)
@@ -48,9 +51,11 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
   const [loaded, setLoaded] = useState(false)
   const started = useRef(false)
   // Tagged with the curve it was computed on: a new curve (resize, series switch) starts over.
-  const [senseState, setSenseState] = useState<{ curve: Curve | null; s: SpiderSenseState }>({
+  // `current` = the data point the finger last reached (red circle; explained on arrival).
+  const [senseState, setSenseState] = useState<{ curve: Curve | null; s: SpiderSenseState; current: number | null }>({
     curve: null,
     s: INITIAL_STATE,
+    current: null,
   })
   const senseRef = useRef(senseState)
   const stepRef = useRef<(p: Point | null) => void>(() => {})
@@ -110,11 +115,11 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
     started.current = true
     engine.setGraph(graph, fieldConfidence, { announce: false })
     installMenu(onReset)
-    const intro = (notice: string) => {
+    const intro = (prefix: string) => {
       // Straight into the graph: the ring points to the start of the line, then along it.
       engine.setMode('graph')
       engine.speech.speak(
-        `${notice}${graph.title}. Follow the ring to the start of the line. Two-finger tap opens the menu.`,
+        `${prefix}${notice}${graph.title}. Follow the ring to the start of the line. Double-tap opens the menu.`,
         'interrupt',
       )
       setLoaded(true)
@@ -137,7 +142,7 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
     } else {
       intro('Reasoning unavailable. ')
     }
-  }, [box, graph, fieldConfidence, reasoning, fetchReasoning, source, onReset])
+  }, [box, graph, fieldConfidence, reasoning, fetchReasoning, source, onReset, notice])
 
   // --- pointer input -----------------------------------------------------------
   useEffect(() => {
@@ -157,46 +162,90 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
     }
     // A mouse in menu mode clicks items directly (see onClick below), so it skips the gestures.
     const toGestures = (e: PointerEvent) => !(e.pointerType === 'mouse' && inMenu())
+
+    // Taps are ours: a double-tap switches modes, a single tap does what Person 3's tap did
+    // (graph: re-read the point; menu: choose). A tap is withheld from the engine (sent as a
+    // cancel) so its own tap handler never fires first. Drags, swipes and long press stay his.
+    const TAP_MS = 300
+    const TAP_MOVE = 12
+    const DOUBLE_MS = 350
+    let downAt = 0
+    let downX = 0
+    let downY = 0
+    let moved = 0
+    let lastTap = 0
+    let single: ReturnType<typeof setTimeout> | null = null
+    const onTap = () => {
+      const now = performance.now()
+      if (single !== null && now - lastTap < DOUBLE_MS) {
+        clearTimeout(single)
+        single = null
+        lastTap = 0
+        engine.menu.toggleMode()
+        return
+      }
+      lastTap = now
+      single = setTimeout(() => {
+        single = null
+        if (inMenu()) engine.menu.activate()
+        else engine.speakCurrentPoint()
+      }, DOUBLE_MS)
+    }
+
     const down = (e: PointerEvent) => {
       lastPointerType.current = e.pointerType
-      if (e.button === 2) return // right-click toggles modes (contextmenu handler)
-      // No capture for a mouse in the menu: capture would retarget the click away from the item.
+      if (e.button === 2) return // right-click: contextmenu handler
+      // Only the first finger counts: a second one would be Person 3's two-finger toggle, and the
+      // menu is double-tap only.
+      if (active !== null && e.pointerId !== active) return
+      active = e.pointerId
+      downAt = performance.now()
+      downX = e.clientX
+      downY = e.clientY
+      moved = 0
       if (toGestures(e)) {
+        // No capture for a mouse in the menu: it would retarget the click away from the item.
         try {
           el.setPointerCapture?.(e.pointerId)
         } catch {
           // capture is a convenience; the gesture is the point
         }
+        engine.gestures.pointerDown(e)
       }
-      if (toGestures(e)) engine.gestures.pointerDown(e)
-      if (active === null) {
-        active = e.pointerId
-        draw(e)
-      }
+      draw(e)
     }
     const move = (e: PointerEvent) => {
-      if (toGestures(e)) engine.gestures.pointerMove(e)
-      // A mouse is the simulated ring: it steers on hover too, no button needed. Like Person 3's
-      // demo page, hover also feeds engine.guide so the buzz and readouts follow the mouse.
-      if (e.pointerId === active) draw(e)
-      else if (active === null && e.pointerType === 'mouse' && !inMenu()) {
+      if (e.pointerId === active) {
+        moved = Math.max(moved, Math.hypot(e.clientX - downX, e.clientY - downY))
+        if (toGestures(e)) engine.gestures.pointerMove(e)
         draw(e)
+      } else if (active === null && e.pointerType === 'mouse' && !inMenu()) {
+        // A mouse is the simulated ring: it steers on hover too, no button needed. Like Person 3's
+        // demo page, hover also feeds engine.guide so the buzz follows the mouse. Engine first,
+        // then the ring: a point's explanation must come after (and cut off) the engine's readout.
         const f = toData(e.clientX, e.clientY)
         if (f) engine.guide(f.x, f.y)
+        draw(e)
       }
     }
     const end = (e: PointerEvent, cancel: boolean) => {
-      if (toGestures(e) && e.button !== 2) {
-        if (cancel) engine.gestures.pointerCancel(e)
-        else engine.gestures.pointerUp(e)
-      }
-      if (e.pointerId === active) active = null
+      if (e.pointerId !== active) return
+      active = null
+      if (!toGestures(e)) return
+      const tap = !cancel && e.button !== 2 && performance.now() - downAt < TAP_MS && moved < TAP_MOVE
+      if (tap) {
+        engine.gestures.pointerCancel(e)
+        onTap()
+      } else if (cancel) engine.gestures.pointerCancel(e)
+      else engine.gestures.pointerUp(e)
     }
     const up = (e: PointerEvent) => end(e, false)
     const cancel = (e: PointerEvent) => end(e, true)
     const context = (e: MouseEvent) => {
+      // Android fires contextmenu on a long press: that must not open the menu (long press
+      // explains the point). Only a real mouse right-click switches modes.
       e.preventDefault()
-      engine.menu.toggleMode()
+      if (lastPointerType.current === 'mouse') engine.menu.toggleMode()
     }
     el.addEventListener('pointerdown', down)
     el.addEventListener('pointermove', move)
@@ -204,6 +253,7 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
     el.addEventListener('pointercancel', cancel)
     el.addEventListener('contextmenu', context)
     return () => {
+      if (single !== null) clearTimeout(single)
       engine.setPointerConverter(null)
       el.removeEventListener('pointerdown', down)
       el.removeEventListener('pointermove', move)
@@ -261,19 +311,37 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
   useEffect(() => {
     stepRef.current = (p: Point | null) => {
       if (!curve) return
-      const prev = senseRef.current.curve === curve ? senseRef.current.s : INITIAL_STATE
+      const same = senseRef.current.curve === curve
+      const prev = same ? senseRef.current.s : INITIAL_STATE
+      let current = same ? senseRef.current.current : null
       const next = stepSpiderSense(prev, p, curve, ringRadius, { guideTo: goal, startAt: startPoint })
-      if (next.goalReached && !prev.goalReached && target === null) {
-        engine.speech.speak('End of graph.', 'interrupt')
+      // Reaching a data point makes it the current point and explains it once.
+      const reach = Math.max(10, ringRadius * 0.35)
+      if (next.phase === 'on-curve' && next.lastContact) {
+        const c = next.lastContact
+        let best = -1
+        let bestD = Infinity
+        ys.forEach((y, i) => {
+          if (y === null) return
+          const d = Math.hypot(px(xAt(i)) - c.x, py(y) - c.y)
+          if (d < bestD) {
+            bestD = d
+            best = i
+          }
+        })
+        if (best >= 0 && bestD <= reach && best !== current) {
+          current = best
+          explainPoint(best)
+        }
       }
-      senseRef.current = { curve, s: next }
+      senseRef.current = { curve, s: next, current }
       setSenseState(senseRef.current)
     }
   })
 
   const sense = senseState.curve === curve ? senseState.s : INITIAL_STATE
+  const currentPoint = senseState.curve === curve ? senseState.current : null
   const contact = sense.lastContact
-  const reached = sense.goalReached && target !== null ? target : null
   const ring =
     sense.pointer && box
       ? {
@@ -354,21 +422,31 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
                   <circle key={i} className="explore__dot" cx={px(xAt(i))} cy={py(y)} r={5} data-testid="dot" />
                 ),
               )}
-              {sense.lastContact === null && startPoint && (
-                <circle className="explore__target" cx={startPoint.x} cy={startPoint.y} r={9} data-testid="start" />
-              )}
-              {target !== null && targetValue !== null && (
+              {/* Yellow: where Next point / Maximum / Minimum is guiding to. */}
+              {target !== null && targetValue !== null && target !== currentPoint && (
                 <circle
-                  className="explore__target"
+                  className="explore__goal"
                   cx={px(xAt(target))}
                   cy={py(targetValue)}
-                  r={9}
+                  r={11}
                   data-testid="target"
                   data-index={target}
                 />
               )}
-              {reached !== null && ys[reached] != null && (
-                <circle className="explore__reached" cx={px(xAt(reached))} cy={py(ys[reached] as number)} r={7} />
+              {/* Red: the current point (the start, until the line is picked up there). */}
+              {currentPoint !== null && ys[currentPoint] != null ? (
+                <circle
+                  className="explore__target"
+                  cx={px(xAt(currentPoint))}
+                  cy={py(ys[currentPoint] as number)}
+                  r={9}
+                  data-testid="current"
+                  data-index={currentPoint}
+                />
+              ) : (
+                startPoint && (
+                  <circle className="explore__target" cx={startPoint.x} cy={startPoint.y} r={9} data-testid="start" />
+                )
               )}
               {contact && <circle className="spider-sense__contact" cx={contact.x} cy={contact.y} r={5} />}
               {ring && <EngineRing {...ring} radius={ringRadius} />}
@@ -409,17 +487,17 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
 
       {helpOpen && (
         <div className="explore__help" role="dialog" aria-label="Gestures">
-          <p className="explore__help-head">Two modes; a two-finger tap switches between them.</p>
+          <p className="explore__help-head">Two modes; a double-tap switches between them.</p>
           <ul>
             <li>
               <b>Graph</b>: move or drag to follow the ring; it points to the start of the line, then along it.
-              Tap reads the point, long press explains it.
+              Each point is explained when you reach it; the red circle marks it. Tap re-reads it.
             </li>
             <li>
               <b>Menu</b>: swipe right or down for the next action, left or up for the previous one; tap to choose.
               Actions: Overview, Next point, Explain, Maximum, Minimum, Start over.
             </li>
-            <li>Laptop: right-click or M switches modes; arrow keys move in the menu; Enter chooses.</li>
+            <li>Laptop: double-click, right-click or M switches modes; arrow keys move in the menu; Enter chooses.</li>
           </ul>
           <p className="explore__help-links">
             <button type="button" onClick={onSliderMode}>

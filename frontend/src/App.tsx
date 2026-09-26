@@ -17,6 +17,8 @@ interface Explored {
   reasoning: ReasoningResponse | null
   fetchReasoning?: (chartAspect: number) => Promise<ReasoningResponse>
   source: GraphSource
+  // Spoken before the title on arrival (e.g. a low-confidence warning).
+  notice?: string
   // Remount key, so each new graph starts a fresh Explore page.
   id: number
 }
@@ -87,13 +89,29 @@ function App() {
     try {
       const response = await extractGraph(image)
       setResult(response)
+      if (response.graph && response.status !== 'error') {
+        // Straight to the graph; low confidence is said once there instead of a confirm step.
+        const graph = response.graph
+        const fieldConfidence = response.fieldConfidence ?? null
+        const notice = response.status === 'low_confidence' ? `${describeExtractionStatus(response) ?? 'Some values may be approximate.'} ` : ''
+        setExplored({
+          graph,
+          fieldConfidence,
+          reasoning: null,
+          fetchReasoning: (chartAspect) => reasonGraph(graph, fieldConfidence, chartAspect),
+          source: from,
+          notice,
+          id: Date.now(),
+        })
+        setState('explore')
+        return
+      }
       engine.speech.speak(confirmSpeech(response), 'interrupt')
     } catch (err) {
       setRequestError(err instanceof Error ? err.message : 'Request failed.')
       engine.speech.speak('The request failed. Tap Retake to try again.', 'interrupt')
-    } finally {
-      setState('confirm')
     }
+    setState('confirm')
   }
 
   const graphOk = !requestError && !!result?.graph && result.status !== 'error'
@@ -118,14 +136,11 @@ function App() {
     setState('explore')
   }
 
-  // The known graph goes through the same confirmation step as a photo (demo step 3).
+  // The known graph goes straight to the graph, like a successful photo.
   function openSaved() {
     setSource('saved')
-    setPreviewUrl(null)
-    setRequestError(null)
-    setResult(SAVED_EXTRACTION)
-    engine.speech.speak(confirmSpeech(SAVED_EXTRACTION), 'interrupt')
-    setState('confirm')
+    setExplored({ ...SAVED, id: Date.now() })
+    setState('explore')
   }
 
   function reset() {
@@ -260,6 +275,7 @@ function App() {
           reasoning={explored.reasoning}
           fetchReasoning={explored.fetchReasoning}
           source={explored.source}
+          notice={explored.notice}
           onReset={reset}
           onSliderMode={() => setState('slider')}
         />
