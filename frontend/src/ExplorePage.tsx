@@ -341,6 +341,10 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
         })
         if (best >= 0 && bestD <= reach && best !== current) {
           current = best
+          // Arrived at the engine's target (Overview start, Next point, Maximum, Minimum): release
+          // it, so the ring and the engine's pulses guide forward along the line again instead of
+          // pulling back to the point just reached. The explanation below re-broadcasts status.
+          if (best === target) engine.guidance.start(null)
           if (quietTarget.current === null || best === quietTarget.current) {
             quietTarget.current = null
             explainPoint(best)
