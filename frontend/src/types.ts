@@ -8,7 +8,7 @@ export interface XAxis {
 
 export interface YAxis {
   label: string
-  unit: string | null
+  unit?: string | null
 }
 
 export interface Series {
@@ -22,7 +22,7 @@ export interface GraphData {
   xAxis: XAxis
   yAxis: YAxis
   series: Series[]
-  summary: string | null
+  summary?: string | null
   confidence: number
 }
 
@@ -36,14 +36,15 @@ export interface FieldConfidence {
 
 export interface ExtractionResponse {
   status: 'ok' | 'low_confidence' | 'error'
-  graph: GraphData | null
-  fieldConfidence: FieldConfidence | null
-  message: string | null
+  // Only status is required by the schema; graph is absent/null on 'error'.
+  graph?: GraphData | null
+  fieldConfidence?: FieldConfidence | null
+  message?: string | null
 }
 
-// Mirrors contracts/reasoning-response.schema.json (Person 2's POST /reason). Only the fields
-// the Explore page reads are typed as required; the rest are optional so a schema tweak there
-// doesn't break the build here.
+// Mirrors contracts/reasoning-response.schema.json (Person 2's POST /reason), all fields as
+// required there. There is no top-level `caveats`: overview.caveats and answers[].caveats are
+// what must be spoken.
 
 export interface ReasoningAnswer {
   answer: string
@@ -51,45 +52,58 @@ export interface ReasoningAnswer {
   caveats: string[]
 }
 
+export type PointDirection = 'up' | 'down' | 'flat' | 'unknown'
+
 export interface ReasonedPoint {
   index: number
   x: string
   value: number | null
   normalised: number | null
-  delta?: number | null
-  changeStrength?: number | null
-  direction: 'up' | 'down' | 'flat' | 'unknown'
+  delta: number | null
+  changeStrength: number | null
+  direction: PointDirection
   isMax: boolean
   isMin: boolean
   isTurningPoint: boolean
-  lowConfidence?: boolean
+  lowConfidence: boolean
   readout: string
   explain: string
+}
+
+export interface TraceSegment {
+  fromIndex: number
+  toIndex: number
+  startFraction: number
+  endFraction: number
+  angle: number | null
+  strength: number | null
+  direction: PointDirection
+  endsAtTurningPoint: boolean
 }
 
 export interface InterestPoint {
   index: number
   x: string
-  value: number | null
+  value: number
   xFraction: number
-  normalised: number | null
-  kinds: string[]
+  normalised: number
+  kinds: ('start' | 'end' | 'max' | 'min' | 'peak' | 'low')[]
   explain: string
 }
 
 export interface ReasonedSeries {
   name: string
-  intro?: string
+  intro: string
   points: ReasonedPoint[]
+  trace: TraceSegment[]
   interestPoints: InterestPoint[]
 }
 
 export interface ReasoningResponse {
   overview: { text: string; caveats: string[] }
-  answers?: Record<string, ReasoningAnswer>
+  answers: Record<'trend' | 'max' | 'changes' | 'compare', ReasoningAnswer>
   series: ReasonedSeries[]
-  range?: { min: number; max: number }
+  range: { min: number | null; max: number | null }
   lowConfidence: boolean
-  caveats?: string[]
-  phrasing?: string
+  phrasing: 'template' | 'llm'
 }

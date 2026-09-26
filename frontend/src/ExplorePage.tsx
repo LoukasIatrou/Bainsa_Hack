@@ -1,278 +1,426 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { createDistanceTicker, hapticCue } from './haptics'
-import { announce, stopSpeech } from './speech'
-import { SpiderSense } from './spiderSense/SpiderSense'
-import { buildCurveFromPoints } from './spiderSense/logic'
-import type { CurveVertex, Point, SpiderSenseState } from './spiderSense/logic'
-import type { GraphData, ReasoningResponse } from './types'
-import { PADDING } from './exploreLayout'
+import { engine } from './engine'
+import type { EngineStatus, GuidanceReading, HapticPatternName } from './engine'
+import { curveAt, monotonePath, monotoneTangents } from './engine/curve'
+import type { PlotBox } from './engine/curve'
+import { normalisedSeries, pointCount, valueRange } from './engine/graphUtils'
+import { EngineRing } from './spiderSense/EngineRing'
+import type { RingPhase } from './spiderSense/EngineRing'
+import './spiderSense/spiderSense.css'
+import type { FieldConfidence, GraphData, ReasoningResponse } from './types'
 
-export type GraphSource = 'saved' | 'live'
+// Live = camera photo, Controlled = uploaded image, Saved = bundled demo graph.
+export type GraphSource = 'live' | 'controlled' | 'saved'
 
 interface ExplorePageProps {
   graph: GraphData
-  // Person 2's /reason output. Null = unavailable; the page falls back to plain readouts.
+  fieldConfidence: FieldConfidence | null
+  // Already known (saved graph), or null to fetch via `fetchReasoning`.
   reasoning: ReasoningResponse | null
+  // Person 2's /reason, called once the plot is measured so chartAspect is the real one.
+  fetchReasoning?: (chartAspect: number) => Promise<ReasoningResponse>
   source: GraphSource
-  // Spoken once on entry, e.g. 'Reasoning unavailable.'
-  notice?: string | null
   onReset: () => void
   onSliderMode: () => void
 }
 
-interface Goal {
-  index: number
-  point: Point
-  kind: 'overview' | 'next'
+// Plot inner box padding inside the framed panel (room for the faint labels).
+const PAD = { left: 38, right: 16, top: 14, bottom: 24 }
+const SOURCE_LABEL: Record<GraphSource, string> = { live: 'Live', controlled: 'Controlled', saved: 'Saved' }
+
+interface Finger {
+  // Normalised data space: x 0..1 across the plot inner box, y 0..1 bottom to top.
+  x: number
+  y: number
 }
 
-function formatValue(value: number | null, unit: string | null): string {
-  if (value === null) return 'unreadable'
+function fmt(value: number | null | undefined, unit: string | null | undefined): string {
+  if (value === null || value === undefined) return 'unreadable'
   return unit ? `${value} ${unit}` : String(value)
 }
 
-// Landscape explore screen: the graph redrawn from data with the spider-sense ring on it, and
-// four big buttons. The ring is the concept (a future physical ring does the pointing); speech
-// stays short and any button interrupts it.
-export function ExplorePage({ graph, reasoning, source, notice, onReset, onSliderMode }: ExplorePageProps) {
-  // TODO: multi-series graphs - only the first series is explored for now.
-  const series = graph.series[0]
-  const reasoned = reasoning?.series[0] ?? null
-
-  const graphRef = useRef<HTMLDivElement>(null)
+// The Explore screen: one framed graph panel, driven entirely by gestures. Every sound and
+// vibration goes through `engine`; this component only draws and routes input.
+export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning, source, onReset, onSliderMode }: ExplorePageProps) {
+  const panelRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState<{ w: number; h: number } | null>(null)
-  const [sense, setSense] = useState<SpiderSenseState | null>(null)
-  const [goal, setGoalState] = useState<Goal | null>(null)
-  const goalRef = useRef<Goal | null>(null)
-  // Short entry line; the details come from Overview.
-  const [intro] = useState(
-    () =>
-      `${source === 'saved' ? 'Saved graph. ' : ''}${notice ? `${notice} ` : ''}${graph.title}. Touch the graph, or press Overview.`,
-  )
-  const [lastSpoken, setLastSpoken] = useState(intro)
-  const prevSense = useRef<SpiderSenseState | null>(null)
-  const ticker = useMemo(() => createDistanceTicker(), [])
+  const [status, setStatus] = useState<EngineStatus>(() => engine.getStatus())
+  const statusRef = useRef(status)
+  const [seriesIndex, setSeriesIndex] = useState(0)
+  const [finger, setFinger] = useState<Finger | null>(null)
+  const fingerRef = useRef<Finger | null>(null)
+  const [reading, setReading] = useState<GuidanceReading | null>(null)
+  const [lastSpoken, setLastSpoken] = useState('')
+  const [lastPattern, setLastPattern] = useState<HapticPatternName | null>(null)
+  const [helpOpen, setHelpOpen] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+  const started = useRef(false)
+  const resumeFrom = useRef<number | null>(null)
 
-  function setGoal(next: Goal | null) {
-    goalRef.current = next
-    setGoalState(next)
-  }
-
-  function say(text: string, onEnd?: () => void) {
-    setLastSpoken(text)
-    announce(text, onEnd)
-  }
-
+  // --- engine wiring ------------------------------------------------------
   useEffect(() => {
-    const el = graphRef.current
-    if (!el) return
-    const measure = () => {
-      const rect = el.getBoundingClientRect()
-      setSize((s) => {
-        const w = Math.floor(rect.width)
-        const h = Math.floor(rect.height)
-        return s && s.w === w && s.h === h ? s : { w, h }
-      })
+    const off = engine.on((event) => {
+      if (event.type === 'status:change') {
+        statusRef.current = event.status
+        setStatus(event.status)
+      } else if (event.type === 'speech:caption') setLastSpoken(event.text)
+      else if (event.type === 'haptic:pattern') setLastPattern(event.pattern)
+    })
+    return () => {
+      off()
+      engine.stopAll()
     }
-    measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(el)
-    return () => observer.disconnect()
   }, [])
 
-  const curve = useMemo(
-    () => (size ? buildCurveFromPoints(series.values, { width: size.w, height: size.h, padding: PADDING }) : null),
-    [size, series],
-  )
-  const vertices = useMemo(() => curve?.vertices ?? [], [curve])
-
-  // Points "Next point" steps through, left to right: Person 2's interest points, or a local
-  // start / max / min / end fallback when reasoning is unavailable.
-  const stops = useMemo(() => {
-    let indices: number[]
-    if (reasoned) {
-      indices = [...reasoned.interestPoints].sort((a, b) => a.xFraction - b.xFraction).map((p) => p.index)
-    } else {
-      const known = vertices.map((v) => v.index)
-      const vals = series.values
-      const byValue = [...known].sort((a, b) => (vals[a] ?? 0) - (vals[b] ?? 0))
-      indices = [...new Set([known[0], byValue[byValue.length - 1], byValue[0], known[known.length - 1]])]
-      indices.sort((a, b) => a - b)
-    }
-    return indices
-      .map((i) => vertices.find((v) => v.index === i))
-      .filter((v): v is CurveVertex => v !== undefined)
-  }, [reasoned, vertices, series])
-
-  function nearestVertex(x: number): CurveVertex | null {
-    let best: CurveVertex | null = null
-    for (const v of vertices) if (!best || Math.abs(v.point.x - x) < Math.abs(best.point.x - x)) best = v
-    return best
-  }
-
-  function label(index: number): string {
-    return `${graph.xAxis.values[index] ?? index + 1}: ${formatValue(series.values[index], graph.yAxis.unit)}`
-  }
-
-  function explainText(index: number): string {
-    return reasoned?.points[index]?.explain ?? `${label(index)}.`
-  }
-
-  function overviewText(): string {
-    if (reasoning) return reasoning.overview.text
-    const xs = graph.xAxis.values
-    return `${graph.title}. ${xs.length} points, ${xs[0]} to ${xs[xs.length - 1]}.`
-  }
-
+  // --- measure the panel --------------------------------------------------
   useEffect(() => {
-    announce(intro)
-    return () => {
-      ticker.stop()
-      stopSpeech()
+    const el = panelRef.current
+    if (!el) return
+    const measure = () => {
+      const r = el.getBoundingClientRect()
+      const w = Math.floor(r.width)
+      const h = Math.floor(r.height)
+      setSize((s) => (s && s.w === w && s.h === h ? s : { w, h }))
     }
-  }, [intro, ticker])
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
-  function handleSense(next: SpiderSenseState) {
-    const prev = prevSense.current
-    prevSense.current = next
-    setSense(next)
+  const box: PlotBox | null = useMemo(
+    () =>
+      size
+        ? {
+            left: PAD.left,
+            top: PAD.top,
+            width: Math.max(1, size.w - PAD.left - PAD.right),
+            height: Math.max(1, size.h - PAD.top - PAD.bottom),
+          }
+        : null,
+    [size],
+  )
+  const boxRef = useRef(box)
+  useEffect(() => {
+    boxRef.current = box
+  }, [box])
 
-    ticker.setDistance(next.phase === 'searching' && next.pointer ? next.distance : null)
-
-    if (next.phase === 'on-curve' && prev?.phase !== 'on-curve') {
-      hapticCue('on-line')
-    } else if (next.phase === 'on-curve' && prev?.lastContact && next.lastContact) {
-      // One short tick for each data point the contact slid over.
-      const lo = Math.min(prev.lastContact.x, next.lastContact.x)
-      const hi = Math.max(prev.lastContact.x, next.lastContact.x)
-      if (hi > lo && vertices.some((v) => v.point.x > lo && v.point.x <= hi)) hapticCue('point')
+  // --- load graph + reasoning into the engine, then speak the entry line --
+  useEffect(() => {
+    if (!box || started.current) return
+    started.current = true
+    engine.setGraph(graph, fieldConfidence)
+    const hint =
+      engine.getGraphKind() === 'continuous' ? 'Double-tap for an overview.' : 'Double-tap for an overview, hold to explain.'
+    const intro = (notice: string) => {
+      engine.speech.speak(`${notice}${graph.title}. ${hint}`, 'interrupt')
+      setLoaded(true)
     }
-
-    const current = goalRef.current
-    if (next.goalReached && !prev?.goalReached && current) {
-      hapticCue('arrived')
-      setGoal(null)
-      const x = graph.xAxis.values[current.index] ?? ''
-      say(current.kind === 'next' ? `${x}. Explain available.` : 'Start of the line.')
-    }
-  }
-
-  function overview() {
-    say(overviewText())
-    const first = vertices[0]
-    if (first) setGoal({ index: first.index, point: first.point, kind: 'overview' })
-  }
-
-  function nextPoint() {
-    // From the current goal if one is set (tap twice to skip ahead), else from the finger.
-    const fromX = goalRef.current?.point.x ?? sense?.lastContact?.x ?? -Infinity
-    const next = stops.find((v) => v.point.x > fromX + 1)
-    if (!next) {
-      setGoal(null)
-      say('No more points.')
-      return
-    }
-    setGoal({ index: next.index, point: next.point, kind: 'next' })
-    say(`Next: ${graph.xAxis.values[next.index] ?? ''}.`)
-  }
-
-  function explain() {
-    const index = goalRef.current?.index ?? (sense?.lastContact ? nearestVertex(sense.lastContact.x)?.index : undefined)
-    if (index === undefined) {
-      say('Touch the graph first.')
-      return
-    }
-    say(explainText(index), () => hapticCue('done'))
-  }
-
-  function stop() {
-    stopSpeech()
-    setGoal(null)
-    ticker.stop()
-  }
-
-  let phaseText = 'No touch'
-  if (sense?.pointer) {
-    if (sense.phase === 'on-curve' && sense.lastContact) {
-      const v = nearestVertex(sense.lastContact.x)
-      phaseText = `On line${v ? ` · ${label(v.index)}` : ''}${sense.atEnd ? ` · ${sense.atEnd}` : ''}`
+    if (reasoning) {
+      engine.setReasoning(reasoning)
+      intro(source === 'saved' ? 'Saved graph. ' : '')
+    } else if (fetchReasoning) {
+      engine.speech.speak('Reading the graph.', 'interrupt')
+      // chartAspect = drawn plot height / width, measured, so slope words match what is felt.
+      fetchReasoning(box.height / box.width)
+        .then((r) => {
+          engine.setReasoning(r)
+          intro('')
+        })
+        .catch(() => intro('Reasoning unavailable. '))
     } else {
-      phaseText = `Searching${sense.mode === 'guided' ? ' · back to the line' : ''}`
+      intro('Reasoning unavailable. ')
     }
-  }
-  if (goal) phaseText += ` · goal ${graph.xAxis.values[goal.index] ?? ''}`
+  }, [box, graph, fieldConfidence, reasoning, fetchReasoning, source])
 
-  const known = series.values.filter((v): v is number => v !== null)
+  // --- geometry -------------------------------------------------------------
+  const n = pointCount(graph)
+  const ys = useMemo(() => normalisedSeries(graph, seriesIndex), [graph, seriesIndex])
+  const tangents = useMemo(() => monotoneTangents(ys), [ys])
+  const path = useMemo(() => (box ? monotonePath(ys, box) : ''), [ys, box])
+  const series = graph.series[seriesIndex]
+  const range = valueRange(graph)
+
+  const px = (x: number) => (box ? box.left + x * box.width : 0)
+  const py = (y: number) => (box ? box.top + (1 - y) * box.height : 0)
+  const xAt = (i: number) => (n > 1 ? i / (n - 1) : 0.5)
+
+  // --- input -> engine.guide ---------------------------------------------
+  // Stable across renders (refs only), so gesture/key listeners bind once.
+  const input = useRef({
+    guideAt(f: Finger | null) {
+      fingerRef.current = f
+      setFinger(f)
+      setReading(f ? engine.guide(f.x, f.y) : null)
+    },
+    clientToFinger(clientX: number, clientY: number): Finger | null {
+      const svg = panelRef.current?.querySelector('svg')
+      const b = boxRef.current
+      if (!svg || !b) return null
+      const r = svg.getBoundingClientRect()
+      // Padding-corrected: normalised against the inner plot box, not the whole panel.
+      return { x: (clientX - r.left - b.left) / b.width, y: 1 - (clientY - r.top - b.top) / b.height }
+    },
+    overview() {
+      resumeFrom.current = null
+      engine.startOverview()
+    },
+    explain() {
+      // Hold again after a Stop resumes the walk where it paused.
+      engine.startExplainMode(resumeFrom.current ?? 0)
+      resumeFrom.current = null
+    },
+    skip() {
+      if (statusRef.current.explaining) engine.skipToNextExplanation()
+      else {
+        engine.speech.speak('Nothing to skip. Hold to explain.', 'interrupt')
+        engine.playPattern('long')
+      }
+    },
+    stop() {
+      const step = statusRef.current.explainStep
+      if (statusRef.current.explaining && step) resumeFrom.current = step - 1
+      engine.stopExplainMode()
+      engine.stopSpeaking()
+    },
+    switchSeries(delta: number) {
+      const total = graph.series.length
+      if (total < 2) {
+        engine.speech.speak('This graph has only one line.', 'interrupt')
+        engine.playPattern('long')
+        return
+      }
+      const next = (engine.explore.currentSeries + delta + total) % total
+      engine.explore.selectSeries(next)
+      resumeFrom.current = null
+      setSeriesIndex(next)
+      engine.speech.speak(`Showing ${graph.series[next]?.name}, line ${next + 1} of ${total}.`, 'interrupt')
+    },
+  })
+
+  // Pointer input. The finger drives guidance through the engine's own pointer entry points
+  // (Person 3's engine.gestures + setPointerConverter), so when his engine is swapped in its
+  // gesture layer takes over unchanged. The page only tracks the finger to draw the ring.
+  // TODO(Haris): bind `input.current` commands (overview / explain / skip / stop / switchSeries)
+  // once the gesture mapping is decided (spec mapping vs Person 3's menu mode).
+  useEffect(() => {
+    const el = panelRef.current
+    if (!el) return
+    const c = input.current
+    engine.setPointerConverter((cx, cy) => c.clientToFinger(cx, cy))
+    let active: number | null = null
+    const draw = (e: PointerEvent) => {
+      const f = c.clientToFinger(e.clientX, e.clientY)
+      fingerRef.current = f
+      setFinger(f)
+      setReading(f ? engine.guidance.read(f.x, f.y) : null)
+    }
+    const down = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse') el.setPointerCapture?.(e.pointerId)
+      engine.gestures.pointerDown(e)
+      if (active === null) {
+        active = e.pointerId
+        draw(e)
+      }
+    }
+    const move = (e: PointerEvent) => {
+      if (active === null && e.pointerType === 'mouse') {
+        // Laptop: a hovering mouse explores like a finger.
+        c.guideAt(c.clientToFinger(e.clientX, e.clientY))
+        return
+      }
+      engine.gestures.pointerMove(e)
+      if (e.pointerId === active) draw(e)
+    }
+    const up = (e: PointerEvent) => {
+      engine.gestures.pointerUp(e)
+      if (e.pointerId !== active) return
+      active = null
+      if (e.pointerType !== 'mouse') c.guideAt(null)
+    }
+    const cancel = (e: PointerEvent) => {
+      engine.gestures.pointerCancel(e)
+      if (e.pointerId === active) {
+        active = null
+        c.guideAt(null)
+      }
+    }
+    const leave = (e: PointerEvent) => {
+      if (e.pointerType === 'mouse' && active === null) c.guideAt(null)
+    }
+    el.addEventListener('pointerdown', down)
+    el.addEventListener('pointermove', move)
+    el.addEventListener('pointerup', up)
+    el.addEventListener('pointercancel', cancel)
+    el.addEventListener('pointerleave', leave)
+    return () => {
+      engine.setPointerConverter(null)
+      el.removeEventListener('pointerdown', down)
+      el.removeEventListener('pointermove', move)
+      el.removeEventListener('pointerup', up)
+      el.removeEventListener('pointercancel', cancel)
+      el.removeEventListener('pointerleave', leave)
+    }
+  }, [])
+
+  // --- ring from guidance state -------------------------------------------
+  const target = status.targetIndex
+  const targetValue = target !== null ? (ys[target] ?? null) : null
+  let ring: { x: number; y: number; angle: number | null; distance: number | null; phase: RingPhase } | null = null
+  let contact: { x: number; y: number } | null = null
+  let reached: number | null = null
+  if (finger && box) {
+    const fx = px(finger.x)
+    const fy = py(finger.y)
+    const r = reading
+    let angle: number | null = null
+    let distance: number | null = null
+    let phase: RingPhase = 'searching'
+    if (r?.state === 'on-curve' && r.curveY !== null) {
+      phase = 'on-curve'
+      contact = { x: fx, y: py(r.curveY) }
+      if (Math.abs(finger.x - xAt(r.index)) * (n - 1) < 0.3 && ys[r.index] !== null) reached = r.index
+      // Along the drawn spline, toward the target if there is one.
+      const e = 0.002
+      const a = curveAt(ys, tangents, finger.x - e)
+      const b = curveAt(ys, tangents, finger.x + e)
+      const tangent = a !== null && b !== null ? Math.atan2(-(b - a) * box.height, 2 * e * box.width) : 0
+      if (target !== null) {
+        if (r.index === target) {
+          phase = 'arrived'
+          distance = 0
+        } else {
+          angle = xAt(target) < finger.x ? tangent + Math.PI : tangent
+          distance = Math.abs(xAt(target) - finger.x) * box.width
+        }
+      } else {
+        angle = finger.x >= 0.995 ? null : tangent
+        distance = 0
+      }
+    } else if (r?.state === 'off-chart') {
+      angle = Math.atan2(py(0.5) - fy, px(0.5) - fx)
+      distance = 300
+    } else if (target !== null && targetValue !== null) {
+      const tx = px(xAt(target))
+      const ty = py(targetValue)
+      angle = Math.atan2(ty - fy, tx - fx)
+      distance = Math.hypot(tx - fx, ty - fy)
+    } else if (r?.push === 'up' || r?.push === 'down') {
+      angle = r.push === 'up' ? -Math.PI / 2 : Math.PI / 2
+      distance = Math.abs(r.delta ?? 1) * box.height
+    }
+    ring = { x: fx, y: fy, angle, distance, phase }
+  }
+  const ringRadius = size ? Math.min(60, Math.max(40, size.h * 0.14)) : 50
+
+  // --- status line ---------------------------------------------------------
+  const where = !finger || !reading
+    ? 'no touch'
+    : reading.state === 'on-curve'
+      ? 'on line'
+      : reading.state === 'off-chart'
+        ? 'off chart'
+        : reading.curveY === null
+          ? 'gap'
+          : `searching ${reading.push}`
+  const parts = ['simulated ring', where]
+  if (reading && finger && reading.state !== 'off-chart') {
+    parts.push(`${graph.xAxis.values[reading.index] ?? ''}: ${fmt(series?.values[reading.index], graph.yAxis.unit)}`)
+  }
+  if (status.explaining && status.explainStep) parts.push(`explaining ${status.explainStep} of ${n}`)
+  else if (target !== null) parts.push(`target ${graph.xAxis.values[target] ?? target + 1}`)
+  if (graph.series.length > 1) parts.push(`line ${seriesIndex + 1}/${graph.series.length}: ${series?.name}`)
+  if (status.graphKind === 'continuous') parts.push('continuous')
+  if (lastPattern) parts.push(`buzz ${lastPattern}`)
+
   const xs = graph.xAxis.values
-  const showEveryX = xs.length <= 12
+  const labelIdx = [...new Set([0, Math.floor((n - 1) / 2), n - 1])]
 
   return (
-    <div className="explore-screen">
-      <div className="explore-left">
-        <div className="explore-graph" ref={graphRef}>
-          {size && curve && (
-            <SpiderSense
-              key={`${size.w}x${size.h}`}
-              curve={curve}
-              width={size.w}
-              height={size.h}
-              guideTo={goal?.point ?? null}
-              onStateChange={handleSense}
-            >
-              <g className="explore-axes" aria-hidden="true">
-                <text className="explore-axes__title" x={PADDING} y={PADDING - 18}>
-                  {graph.title}
+    <div className="explore" data-loaded={loaded ? 'true' : 'false'}>
+      <header className="explore__top">
+        <span className="explore__title">{graph.title}</span>
+        <span className="explore__badge">{SOURCE_LABEL[source]}</span>
+        <button
+          type="button"
+          className="explore__help-tab"
+          aria-expanded={helpOpen}
+          aria-label="Gesture help"
+          onClick={() => setHelpOpen((o) => !o)}
+        >
+          ?
+        </button>
+      </header>
+
+      <div className="explore__panel" ref={panelRef} role="application" aria-label={`Graph: ${graph.title}. Drag to explore.`}>
+        {size && box && (
+          <svg width={size.w} height={size.h} viewBox={`0 0 ${size.w} ${size.h}`} aria-hidden="true">
+            <g className="explore__labels">
+              {range && (
+                <>
+                  <text x={box.left - 6} y={box.top + 4} textAnchor="end">
+                    {range.max}
+                  </text>
+                  <text x={box.left - 6} y={box.top + box.height} textAnchor="end">
+                    {range.min}
+                  </text>
+                </>
+              )}
+              {labelIdx.map((i) => (
+                <text
+                  key={i}
+                  x={px(xAt(i))}
+                  y={box.top + box.height + 17}
+                  textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'}
+                >
+                  {xs[i]}
                 </text>
-                <line x1={PADDING} y1={PADDING} x2={PADDING} y2={size.h - PADDING} />
-                <line x1={PADDING} y1={size.h - PADDING} x2={size.w - PADDING} y2={size.h - PADDING} />
-                <text x={PADDING - 6} y={PADDING + 5} textAnchor="end">
-                  {Math.max(...known)}
-                </text>
-                <text x={PADDING - 6} y={size.h - PADDING} textAnchor="end">
-                  {Math.min(...known)}
-                </text>
-                {vertices.map((v) =>
-                  showEveryX || v === vertices[0] || v === vertices[vertices.length - 1] ? (
-                    <text key={v.index} x={v.point.x} y={size.h - PADDING + 20} textAnchor="middle">
-                      {xs[v.index]}
-                    </text>
-                  ) : null,
-                )}
-                {vertices.map((v) => (
-                  <circle key={v.index} className="explore-axes__dot" cx={v.point.x} cy={v.point.y} r={3} />
-                ))}
-              </g>
-            </SpiderSense>
-          )}
-        </div>
-        <div className="explore-caption">
-          <span className={`explore-badge explore-badge--${source}`}>{source === 'saved' ? 'Saved graph' : 'Live'}</span>
-          <span className="explore-caption__live" aria-live="polite">
-            <strong>Simulated ring</strong> · {phaseText}
-            {lastSpoken && <> · Said: &ldquo;{lastSpoken}&rdquo;</>}
-          </span>
-          <button type="button" className="explore-link" onClick={onSliderMode}>
-            Slider mode
-          </button>
-          <button type="button" className="explore-link" onClick={onReset}>
-            Reset
-          </button>
-        </div>
+              ))}
+            </g>
+            <path className="explore__curve" d={path} data-testid="curve" />
+            {target !== null && targetValue !== null && (
+              <circle
+                className="explore__target"
+                cx={px(xAt(target))}
+                cy={py(targetValue)}
+                r={7}
+                data-testid="target"
+                data-index={target}
+              />
+            )}
+            {reached !== null && ys[reached] != null && (
+              <circle className="explore__reached" cx={px(xAt(reached))} cy={py(ys[reached] as number)} r={6} />
+            )}
+            {contact && <circle className="spider-sense__contact" cx={contact.x} cy={contact.y} r={5} />}
+            {ring && <EngineRing {...ring} radius={ringRadius} />}
+          </svg>
+        )}
       </div>
-      <div className="explore-buttons">
-        <button type="button" onClick={overview}>
-          Overview
-        </button>
-        <button type="button" onClick={nextPoint}>
-          Next point
-        </button>
-        <button type="button" onClick={explain}>
-          Explain
-        </button>
-        <button type="button" onClick={stop}>
-          Stop
-        </button>
-      </div>
+
+      <p className="explore__status" data-testid="status">
+        {parts.join(' · ')}
+      </p>
+      <p className="explore__said" aria-live="polite" data-testid="said">
+        {lastSpoken}
+      </p>
+      <p className="explore__hints">drag one finger: explore · the ring and vibration point to the line</p>
+
+      {helpOpen && (
+        <div className="explore__help" role="dialog" aria-label="Gestures">
+          <ul>
+            <li>Drag one finger: explore. The ring and vibration point you to the line.</li>
+            <li>Double vibration: you reached the point. Long: edge, or a value that could not be read.</li>
+          </ul>
+          <p className="explore__help-links">
+            <button type="button" onClick={onSliderMode}>
+              Slider mode
+            </button>
+            <button type="button" onClick={onReset}>
+              New photo
+            </button>
+          </p>
+        </div>
+      )}
     </div>
   )
 }

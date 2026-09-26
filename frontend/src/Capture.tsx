@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { announce } from './speech'
+import { engine } from './engine'
 
 interface CaptureProps {
   onCapture: (image: Blob) => void
@@ -13,9 +13,7 @@ type CameraStatus = 'requesting' | 'ready' | 'error'
 // a small target - tapping anywhere works, and with TalkBack/VoiceOver on,
 // one tap announces the label and a second tap activates it as normal.
 //
-// No upload fallback for now (removed on request) - the team brief lists
-// image upload as a required alternative capture route, so this should
-// come back before the final demo checklist.
+// The 'Upload image' fallback (Controlled mode) lives next to this in App.
 export function Capture({ onCapture }: CaptureProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [status, setStatus] = useState<CameraStatus>('requesting')
@@ -61,7 +59,7 @@ export function Capture({ onCapture }: CaptureProps) {
       if (!blob) return
       // Immediate confirmation at the moment of the tap, before the network round-trip -
       // a blind user has no visual cue that the tap registered otherwise.
-      announce('Graph captured. Processing.')
+      engine.speech.speak('Graph captured. Processing.', 'interrupt')
       onCapture(blob)
     }, 'image/jpeg', 0.9)
   }

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { RingSimulator } from './RingSimulator'
 import type { PullDirection } from './RingSimulator'
-import { announce } from './speech'
+import { engine } from './engine'
+import type { HapticPatternName } from './engine'
+import { isLocalExtremum } from './engine/graphUtils'
 import type { GraphData } from './types'
 
 interface ExplorationProps {
@@ -12,12 +14,10 @@ interface ExplorationProps {
 // docs/phone-demo-navigation.md §7.2, option (b): series are rows, points are columns.
 // Switching rows keeps the current column (§7.3-B) so the user stays oriented at the same
 // x-position instead of silently jumping back to the start of the new series.
-const VIBRATION_PATTERNS: Record<PullDirection, number[]> = {
-  rising: [40, 30, 60, 30, 90],
-  falling: [90, 30, 60, 30, 40],
-  flat: [30],
-  unknown: [],
-}
+//
+// Vibrations are Person 3's five HAPTIC_PATTERNS (contracts/haptic-patterns.md), in his
+// exploration order: unreadable -> long, extremum -> double, rise -> rising, fall -> falling,
+// otherwise short.
 
 function getPullDirection(previous: number | null, current: number | null): PullDirection {
   if (previous === null || current === null) return 'unknown'
@@ -26,7 +26,7 @@ function getPullDirection(previous: number | null, current: number | null): Pull
   return 'flat'
 }
 
-function formatValue(value: number | null, unit: string | null): string {
+function formatValue(value: number | null, unit: string | null | undefined): string {
   if (value === null) return 'unknown value'
   return unit ? `${value}${unit}` : `${value}`
 }
@@ -44,13 +44,15 @@ export function Exploration({ graph, onBack }: ExplorationProps) {
 
   useEffect(() => {
     // docs/phone-demo-navigation.md §2: discrete speech per point.
-    announce(`${series.name}. ${pointLabel}: ${formatValue(currentValue, graph.yAxis.unit)}`)
+    engine.speech.speak(`${series.name}. ${pointLabel}: ${formatValue(currentValue, graph.yAxis.unit)}`, 'interrupt')
 
-    // iOS Safari has no navigator.vibrate - the ring's visual pulse layer is what carries the
-    // haptic story there (docs/phone-demo-navigation.md §3).
-    if ('vibrate' in navigator) {
-      navigator.vibrate(VIBRATION_PATTERNS[direction])
-    }
+    // iOS Safari has no navigator.vibrate - the ring's visual pulse layer carries it there.
+    let pattern: HapticPatternName = 'short'
+    if (currentValue === null) pattern = 'long'
+    else if (isLocalExtremum(series, pointIndex)) pattern = 'double'
+    else if (direction === 'rising') pattern = 'rising'
+    else if (direction === 'falling') pattern = 'falling'
+    engine.playPattern(pattern)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seriesIndex, pointIndex])
 
