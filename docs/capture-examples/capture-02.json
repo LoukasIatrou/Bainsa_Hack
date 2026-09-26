@@ -1,0 +1,45 @@
+{
+  "status": "ok",
+  "graph": {
+    "graphType": "line",
+    "title": "Untitled line graph",
+    "xAxis": {
+      "label": "Week",
+      "values": [
+        "Week 1",
+        "Week 2",
+        "Week 3",
+        "Week 4",
+        "Week 5",
+        "Week 6"
+      ]
+    },
+    "yAxis": {
+      "label": "Signups",
+      "unit": null
+    },
+    "series": [
+      {
+        "name": "Signups",
+        "values": [
+          12.0,
+          18.0,
+          25.0,
+          24.0,
+          40.0,
+          55.0
+        ]
+      }
+    ],
+    "summary": "The number of signups generally increased over the weeks, with a slight dip in Week 4 before a significant rise in the final two weeks.",
+    "confidence": 0.95
+  },
+  "fieldConfidence": {
+    "graphType": 1.0,
+    "title": 0.9,
+    "xAxis": 0.95,
+    "yAxis": 0.95,
+    "series": 0.95
+  },
+  "message": null
+}

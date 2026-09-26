@@ -11,3 +11,7 @@ dist/
 # Editors / OS
 .DS_Store
 .vscode/
+
+# Scratch / local dev
+.scratch-images/
+*.log
