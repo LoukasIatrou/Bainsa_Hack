@@ -11,3 +11,6 @@ dist/
 # Editors / OS
 .DS_Store
 .vscode/
+
+# Claude Code session settings
+.claude/
