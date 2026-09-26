@@ -56,7 +56,7 @@ def reason_endpoint(request: ReasonRequest) -> ReasoningResponse:
 
 
 @app.get("/reason/mock", response_model=ReasoningResponse)
-def reason_mock(scenario: str = "mobile_italy_japan") -> ReasoningResponse:
+def reason_mock(scenario: str = "unemployment_us") -> ReasoningResponse:
     """/reason run on a fixture from fixtures/, for building the frontend."""
     fixture_path = _FIXTURES_DIR / f"{scenario}.json"
     extraction = ExtractionResponse(**json.loads(fixture_path.read_text(encoding="utf-8")))

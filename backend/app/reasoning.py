@@ -5,6 +5,7 @@ per-point exploration data. Every number here is computed deterministically;
 the optional LLM layer (phrasing_llm.py) may only reword these texts.
 """
 
+import math
 import os
 from dataclasses import dataclass, field
 
@@ -17,12 +18,15 @@ from .schemas import (
     Overview,
     PointInsight,
     ReasoningResponse,
+    InterestPoint,
     SeriesInsight,
+    TraceSegment,
     ValueRange,
 )
 
 LOW_CONFIDENCE_THRESHOLD = 0.6  # same threshold as extraction._CONFIDENCE_THRESHOLD
 FLAT_FRACTION = 0.02  # moves smaller than 2% of the value range count as flat
+CHART_ASPECT = 0.6  # assumed chart height / width, for ring angles
 
 _SPOKEN_UNITS = {
     "°C": "degrees Celsius",
@@ -276,92 +280,95 @@ class Reasoner:
             return parts[0]
         return ", ".join(parts[:-1]) + ", then " + parts[-1]
 
-    # answers
+    # answers - kept to one short sentence each: audio is an add-on to the ring
+
+    def prominent_turn(self, s: SeriesFacts) -> tuple[int, str, bool] | None:
+        """The turning point that defines the shape, if one does: (index, kind, sharp).
+
+        A turn is prominent when the smaller of its two legs covers at least 30% of
+        the value range, so small wobbles never become the headline.
+        """
+        if not s.turns or self.span == 0:
+            return None
+        stops = [s.points[0][1]] + [s.values[i] for i, _ in s.turns] + [s.points[-1][1]]
+        best, best_leg = None, 0.0
+        for k, (i, kind) in enumerate(s.turns):
+            legs = (abs(stops[k + 1] - stops[k]), abs(stops[k + 1] - stops[k + 2]))
+            if min(legs) > best_leg:
+                best, best_leg = (i, kind, legs[0] >= 0.5 * self.span), min(legs)
+        return best if best_leg >= 0.3 * self.span else None
+
+    def brief_shape(self, s: SeriesFacts, with_x: bool = False) -> str:
+        """e.g. 'spikes to 8.1 percent in 2020, then falls back' or 'rises from 104 to 169 per 100 people'."""
+        if len(s.points) == 1:
+            return f"only one value, {self.sp.say(s.points[0][1])}"
+        turn = self.prominent_turn(s)
+        if turn:
+            i, kind, sharp = turn
+            if kind == "peak":
+                verb, back = ("spikes" if sharp else "rises"), "then falls back"
+            else:
+                verb, back = ("plunges" if sharp else "falls"), "then recovers"
+            return f"{verb} to {self.sp.say(s.values[i])} in {self.xl(i)}, {back}"
+        (i0, first), (i1, last) = s.points[0], s.points[-1]
+        at0, at1 = (f" in {self.xl(i0)}", f" in {self.xl(i1)}") if with_x else ("", "")
+        net = s.net_direction
+        if net == "flat":
+            return f"stays around {self.sp.say(first)}"
+        verb = "rises" if net == "up" else "falls"
+        return f"{verb} from {self.sp.num(first)}{at0} to {self.sp.say(last)}{at1}"
+
+    def per_series(self, parts: list[tuple[SeriesFacts, str]]) -> str:
+        """One sentence; series names only when there is more than one."""
+        if not self.multi:
+            text = parts[0][1]
+            return text[0].upper() + text[1:] + "."
+        return "; ".join(f"{s.name}: {text}" for s, text in parts) + "."
 
     def answer_trend(self) -> Answer:
-        sentences, highlight = [], []
-        for s in self.series:
-            if s.empty:
-                continue
-            first, last = s.points[0], s.points[-1]
-            if not s.turns:
-                text = f"{s.name} {self.shape(s)}"
-                if s.net_direction != "flat":
-                    change = "an increase" if last[1] > first[1] else "a decrease"
-                    text += f", {change} of {self.sp.say(abs(last[1] - first[1]))}"
-                    text = text.replace(
-                        f"from {self.sp.num(first[1])} to {self.sp.num(last[1])}",
-                        f"from {self.sp.num(first[1])} in {self.xl(first[0])} to {self.sp.num(last[1])} in {self.xl(last[0])}",
-                    )
-                sentences.append(text + ".")
-            else:
-                text = f"{s.name} {self.legs(s)}."
-                net = s.net_direction
-                if net == "flat":
-                    text += " Overall, it ends roughly where it started."
-                else:
-                    word = "rises" if net == "up" else "falls"
-                    text += f" Overall, it {word} by {self.sp.say(abs(last[1] - first[1]))}."
-                sentences.append(text)
-                highlight += [Highlight(series=s.name, index=i) for i, _ in s.turns]
-            highlight += [Highlight(series=s.name, index=first[0]), Highlight(series=s.name, index=last[0])]
-        if not sentences:
-            return Answer(answer="No values could be read, so the trend is unknown.", caveats=self.caveats())
-        return Answer(answer=" ".join(sentences), highlight=highlight, caveats=self.caveats())
+        readable = [s for s in self.series if not s.empty]
+        if not readable:
+            return Answer(answer="The trend is unknown: no values could be read.", caveats=self.caveats())
+        highlight = []
+        parts = []
+        for s in readable:
+            parts.append((s, self.brief_shape(s, with_x=True)))
+            turn = self.prominent_turn(s)
+            if turn:
+                highlight.append(Highlight(series=s.name, index=turn[0]))
+            highlight += [Highlight(series=s.name, index=s.points[0][0]), Highlight(series=s.name, index=s.points[-1][0])]
+        return Answer(answer=self.per_series(parts), highlight=highlight, caveats=self.caveats())
 
     def answer_max(self) -> Answer:
         readable = [s for s in self.series if not s.empty]
         if not readable:
-            return Answer(answer="No values could be read, so the maximum is unknown.", caveats=self.caveats())
+            return Answer(answer="The highest value is unknown: no values could be read.", caveats=self.caveats())
         top = self.hi
         hits = [(s, i) for s in readable for i in s.extreme_indices(True) if s.values[i] == top]
-        groups = {}  # series name -> labels, so ties read "A in M2, M4 and M6; B in M1"
+        groups = {}  # series name -> labels, so ties read "A in M2 and M4; B in M1"
         for s, i in hits:
             groups.setdefault(s.name, []).append(self.xl(i))
         if self.multi:
             where = "; ".join(f"{name} in {join_words(labels)}" for name, labels in groups.items())
         else:
-            where = join_words(next(iter(groups.values())))
-        verb = "reached by" if self.multi else "in"
-        sentences = [f"The highest value is {self.sp.say(top)}, {verb} {where}."]
-        if len(hits) > 1:
-            sentences[0] = f"The highest value, {self.sp.say(top)}, is reached {times_word(len(hits))}: {where}."
-        if self.multi:
-            for s in readable:
-                if any(h[0] is s for h in hits):
-                    continue
-                idxs = s.extreme_indices(True)
-                peak = s.values[idxs[0]]
-                sentences.append(
-                    f"{s.name}'s highest is {self.sp.num(peak)}, in {join_words([self.xl(i) for i in idxs])}."
-                )
+            where = "in " + join_words(next(iter(groups.values())))
         highlight = [Highlight(series=s.name, index=i) for s, i in hits]
-        return Answer(answer=" ".join(sentences), highlight=highlight, caveats=self.caveats())
+        return Answer(answer=f"Highest: {self.sp.say(top)}, {where}.", highlight=highlight, caveats=self.caveats())
 
     def answer_changes(self) -> Answer:
-        sentences, highlight = [], []
-        for s in self.series:
-            if s.empty:
-                continue
+        readable = [s for s in self.series if not s.empty]
+        if not readable:
+            return Answer(answer="Unknown: no values could be read.", caveats=self.caveats())
+        parts, highlight = [], []
+        for s in readable:
             if not s.turns:
-                net = s.net_direction
-                if net == "flat":
-                    sentences.append(f"{s.name} stays roughly level, with no clear change of direction.")
-                else:
-                    verb = "rises" if net == "up" else "falls"
-                    sentences.append(f"{s.name} {verb} throughout, with no change of direction.")
+                word = {"up": "rises", "down": "falls", "flat": "stays level"}[s.net_direction]
+                parts.append((s, f"{word} throughout, with no change of direction"))
                 continue
-            events = []
-            for i, kind in s.turns:
-                v = self.sp.num(s.values[i])
-                events.append(f"peaks at {v} in {self.xl(i)}" if kind == "peak" else f"reaches a low of {v} in {self.xl(i)}")
-                highlight.append(Highlight(series=s.name, index=i))
-            sentences.append(
-                f"{s.name} changes direction {times_word(len(s.turns))}: it " + ", then ".join(events) + "."
-            )
-        if not sentences:
-            return Answer(answer="No values could be read, so changes in the trend are unknown.", caveats=self.caveats())
-        return Answer(answer=" ".join(sentences), highlight=highlight, caveats=self.caveats())
+            events = [f"{'peak' if kind == 'peak' else 'low'} in {self.xl(i)}" for i, kind in s.turns]
+            highlight += [Highlight(series=s.name, index=i) for i, _ in s.turns]
+            parts.append((s, ", ".join(events)))
+        return Answer(answer=self.per_series(parts), highlight=highlight, caveats=self.caveats())
 
     def crossings(self, a: SeriesFacts, b: SeriesFacts) -> tuple[list[tuple[str, int, int]], list[int]]:
         """Runs of (leader, first index, last index) and the aligned indices used."""
@@ -430,58 +437,29 @@ class Reasoner:
             sentences.append(f"The biggest gap is {self.sp.say(big_gap)}, in {self.xl(big_i)}, with {ahead} ahead.")
         return Answer(answer=" ".join(sentences), highlight=highlight, caveats=caveats)
 
-    # overview
+    # overview - graph type and axes; the shape itself is left for the ring to reveal
 
     def overview(self, style: str) -> Overview:
         g = self.graph
-        readable = [s for s in self.series if not s.empty]
-        span = self.x_span(len(self.x))
-        who = f", for {join_words([s.name for s in self.series])}" if self.multi else ""
-        unit = self.sp.unit
-        if unit:
-            unit = f" {unit}" if unit.startswith("per ") else f" in {unit}"
         title = g.title.strip().rstrip(".!?;:,")
-        sentences = [
-            f"Line graph titled {title}, showing {lower_first(g.yAxis.label)}{unit}"
-            f" by {lower_first(g.xAxis.label)}{span}{who}."
-        ]
-        if readable:
-            sentences += [f"{s.name} {self.shape(s)}." for s in readable[:3]]
-            sentences.append(self.key_finding(readable))
-        else:
-            sentences.append("No values could be read from this graph.")
-
-        text = " ".join(s for s in sentences if s)
+        sentences = [f"Line graph: {title}."]
+        across = self.x_span(len(self.x)).replace(" from ", ", ", 1)
+        sentences.append(f"Across: {lower_first(g.xAxis.label)}{across}.")
+        unit = self.sp.unit
+        unit = (f" {unit}" if unit.startswith("per ") else f", in {unit}") if unit else ""
+        up = f"Up: {lower_first(g.yAxis.label)}{unit}"
+        if self.lo is not None and self.span > 0:
+            up += f", from {self.sp.num(self.lo)} to {self.sp.num(self.hi)}"
+        sentences.append(up + ".")
+        if self.multi:
+            sentences.append(f"{plural(len(self.series), 'line')}: {join_words([s.name for s in self.series])}.")
+        if self.lo is None:
+            sentences.append("No values could be read.")
+        text = " ".join(sentences)
         if self.low_confidence:
-            warning = "This graph was hard to read, so values may be approximate."
-            text = f"Caution: {warning} {text}" if style == "uncertainty_first" else f"{text} {warning}"
+            warning = "Values are approximate."
+            text = f"{warning} {text}" if style == "uncertainty_first" else f"{text} {warning}"
         return Overview(text=text, caveats=self.caveats())
-
-    def key_finding(self, readable: list[SeriesFacts]) -> str:
-        if len(readable) >= 2:
-            a, b = readable[0], readable[1]
-            runs, _ = self.crossings(a, b)
-            real = [r for r in runs if r[0] != "equal"]
-            if len(real) >= 2:
-                (_, _, end0), (winner, start1, _) = real[0], real[1]
-                loser = a.name if winner == b.name else b.name
-                return f"{winner} overtakes {loser} between {self.xl(end0)} and {self.xl(start1)}."
-            if len(real) == 1:
-                return f"{real[0][0]} is higher throughout."
-            return ""
-        s = readable[0]
-        if s.turns:
-            # the turning point furthest from its neighbouring stops is the most striking
-            stops = [s.points[0][1]] + [s.values[i] for i, _ in s.turns] + [s.points[-1][1]]
-            best = max(
-                range(len(s.turns)),
-                key=lambda k: abs(stops[k + 1] - stops[k]) + abs(stops[k + 1] - stops[k + 2]),
-            )
-            i, kind = s.turns[best]
-            word = "peak" if kind == "peak" else "low point"
-            return f"The key moment is a {word} of {self.sp.say(s.values[i])} in {self.xl(i)}."
-        idx = s.extreme_indices(True)[0]
-        return f"The highest value is {self.sp.say(s.values[idx])}, in {self.xl(idx)}."
 
     # exploration
 
@@ -495,12 +473,11 @@ class Reasoner:
 
     def series_insight(self, s: SeriesFacts) -> SeriesInsight:
         count = len(s.values)
+        unit = f", {self.sp.unit}" if self.sp.unit.startswith("per ") else f", in {self.sp.unit}" if self.sp.unit else ""
         if s.empty:
-            intro = f"{s.name}. {plural(count, 'point')}, but no values could be read."
-        elif len(s.points) == 1:
-            intro = f"{s.name}. Only one value: {self.sp.say(s.points[0][1])}, at {self.xl(s.points[0][0])}."
+            intro = f"{s.name}: no values could be read."
         else:
-            intro = f"{s.name}. {plural(count, 'point')},{self.x_span(count)}. It {self.shape(s)}."
+            intro = f"{s.name}{unit}{self.x_span(count).replace(' from ', ', ', 1)}."
         turn_kind = dict(s.turns)
         max_idx = set(s.extreme_indices(True)) if not s.empty else set()
         min_idx = set(s.extreme_indices(False)) if not s.empty else set()
@@ -516,48 +493,131 @@ class Reasoner:
                 points.append(PointInsight(
                     index=i, x=label, value=None, normalised=None, delta=None, changeStrength=None,
                     direction="unknown", isMax=False, isMin=False, isTurningPoint=False,
-                    lowConfidence=True, readout=f"{label}, value could not be read.",
+                    lowConfidence=True, readout=f"{label}: unreadable.",
                 ))
                 continue
 
             normalised = 0.5 if self.span == 0 else (v - self.lo) / self.span
             if i == 0:
                 delta, strength, direction = None, 0.0, "flat"
-                change = ""
             elif prev is None:
                 delta, strength, direction = None, None, "unknown"
-                change = f", previous value unknown"
             else:
                 delta = v - prev
-                strength = 0.0 if self.span == 0 else min(1.0, abs(delta) / self.span)
+                strength = self.strength(delta)
                 direction = s.direction(delta)
-                prev_label = self.xl(i - 1)
-                if delta == 0:
-                    change = f", unchanged from {prev_label}"
-                elif direction == "flat":
-                    change = f", about the same as {prev_label}"
-                else:
-                    change = f", {direction} {self.sp.num(abs(delta))} from {prev_label}"
 
-            tags = []
+            # the ring conveys direction; speech just names the value and any landmark
+            tag = ""
             if i in max_idx:
-                tags.append("Highest point.")
-            if i in min_idx:
-                tags.append("Lowest point.")
-            if i in turn_kind and i not in max_idx and i not in min_idx:
-                tags.append("A peak; the trend turns down." if turn_kind[i] == "peak" else "A low point; the trend turns up.")
-
-            readout = f"{label}, {self.sp.say(v)}{change}."
-            if tags:
-                readout += " " + " ".join(tags)
+                tag = ", highest"
+            elif i in min_idx:
+                tag = ", lowest"
+            elif i in turn_kind:
+                tag = ", peak" if turn_kind[i] == "peak" else ", low point"
             points.append(PointInsight(
                 index=i, x=label, value=v, normalised=round(normalised, 4),
                 delta=None if delta is None else round(delta, 6),
                 changeStrength=None if strength is None else round(strength, 4),
                 direction=direction, isMax=i in max_idx, isMin=i in min_idx,
-                isTurningPoint=i in turn_kind, lowConfidence=self.low_confidence, readout=readout,
+                isTurningPoint=i in turn_kind, lowConfidence=self.low_confidence,
+                readout=f"{label}: {self.sp.num(v)}{tag}.",
             ))
-        return SeriesInsight(name=s.name, intro=intro, points=points)
+        return SeriesInsight(
+            name=s.name, intro=intro, points=points, trace=self.trace(s),
+            interestPoints=self.interest_points(s, max_idx, min_idx),
+        )
+
+    # explore page: 'Next point' stops and 'Explain' texts
+
+    def interest_points(self, s: SeriesFacts, max_idx: set[int], min_idx: set[int]) -> list[InterestPoint]:
+        if s.empty:
+            return []
+        kinds: dict[int, list[str]] = {}
+        kinds.setdefault(s.points[0][0], []).append("start")
+        for i in sorted(max_idx):
+            kinds.setdefault(i, []).append("max")
+        for i in sorted(min_idx):
+            kinds.setdefault(i, []).append("min")
+        for i, kind in s.turns:
+            kinds.setdefault(i, []).append(kind if kind == "peak" else "low")
+        if len(s.points) > 1:
+            kinds.setdefault(s.points[-1][0], []).append("end")
+
+        n = len(s.values)
+        stops = []
+        for i in sorted(kinds):
+            v = s.values[i]
+            stops.append(InterestPoint(
+                index=i, x=self.xl(i), value=v,
+                xFraction=round(i / (n - 1), 4) if n > 1 else 0.0,
+                normalised=round(0.5 if self.span == 0 else (v - self.lo) / self.span, 4),
+                kinds=kinds[i], explain=self.explain(s, i, kinds[i]),
+            ))
+        return stops
+
+    def explain(self, s: SeriesFacts, i: int, kinds: list[str]) -> str:
+        """Coordinates, then why the point matters, e.g. '2020, 8.1 percent. The highest point; after this it falls.'"""
+        what = []
+        if "max" in kinds:
+            what.append("the highest point")
+        elif "min" in kinds:
+            what.append("the lowest point")
+        if "peak" in kinds and "max" not in kinds:
+            what.append("a peak")
+        if "low" in kinds and "min" not in kinds:
+            what.append("a low point")
+        if "start" in kinds:
+            what.append("the start of the graph")
+        if "end" in kinds:
+            what.append("the end of the graph")
+        text = f"{self.xl(i)}, {self.sp.say(s.values[i])}."
+        if what:
+            label = join_words(what)
+            text += f" {label[0].upper()}{label[1:]}"
+            if "peak" in kinds:
+                text += "; after this it falls"
+            elif "low" in kinds:
+                text += "; after this it rises"
+            text += "."
+        return text
+
+    # ring trace
+
+    def strength(self, delta: float) -> float:
+        return 0.0 if self.span == 0 else min(1.0, abs(delta) / self.span)
+
+    def trace(self, s: SeriesFacts) -> list[TraceSegment]:
+        """Segments for a continuous sweep along the line, evenly spaced in time.
+
+        The angle is the slope as drawn on a chart CHART_ASPECT times as tall as it
+        is wide, with values scaled to the shared range, so it matches what a
+        sighted reader sees: 0 = flat, +90 = straight up, -90 = straight down.
+        """
+        n = len(s.values)
+        if n < 2:
+            return []
+        turn_idx = {i for i, _ in s.turns}
+        dx = 1 / (n - 1)
+        segments = []
+        for i in range(1, n):
+            v0, v1 = s.values[i - 1], s.values[i]
+            if v0 is None or v1 is None:
+                angle = strength = None
+                direction = "unknown"
+            else:
+                delta = v1 - v0
+                dy = 0.0 if self.span == 0 else delta / self.span * CHART_ASPECT
+                angle = round(math.degrees(math.atan2(dy, dx)), 1)
+                strength = round(self.strength(delta), 4)
+                direction = s.direction(delta)
+            segments.append(TraceSegment(
+                fromIndex=i - 1, toIndex=i,
+                startFraction=round((i - 1) * dx, 4), endFraction=round(i * dx, 4),
+                angle=angle, strength=strength, direction=direction,
+                endsAtTurningPoint=i in turn_idx,
+            ))
+        return segments
 
 
 def reason(
