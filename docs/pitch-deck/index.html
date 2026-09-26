@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Graph Accessibility Copilot — Pitch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,440;0,9..144,600;0,9..144,900;1,9..144,440&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #0a0908;
+    --panel: #131210;
+    --paper: #f2ede1;
+    --muted: #b3a996;
+    --amber: #ffb200;
+    --amber-dim: rgba(255,178,0,.28);
+    --rule: rgba(242,237,225,.14);
+    --serif: 'Fraunces', Georgia, 'Times New Roman', serif;
+    --mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  }
+
+  *{ box-sizing: border-box; }
+  html,body{ height: 100%; }
+  body{
+    margin: 0;
+    background: var(--bg);
+    color: var(--paper);
+    font-family: var(--serif);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* subtle braille/dot-matrix texture, ties visuals to a tactile medium */
+  body::before{
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image: radial-gradient(circle, var(--paper) 1px, transparent 1.4px);
+    background-size: 15px 15px;
+    opacity: .035;
+    pointer-events: none;
+    z-index: 1;
+  }
+  body::after{
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(ellipse at 50% 0%, rgba(255,178,0,.06), transparent 55%);
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .deck{ position: relative; width: 100vw; height: 100vh; z-index: 2; }
+
+  .slide{
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8vh 9vw;
+    opacity: 0;
+    transform: translateY(14px);
+    pointer-events: none;
+    transition: opacity .5s ease, transform .5s ease;
+  }
+  .slide.active{ opacity: 1; transform: translateY(0); pointer-events: auto; }
+
+  .slide-inner{ width: 100%; max-width: 1180px; }
+
+  .eyebrow{
+    display: block;
+    font-family: var(--mono);
+    font-size: 13px;
+    letter-spacing: .22em;
+    color: var(--amber);
+    margin-bottom: 28px;
+    font-weight: 500;
+  }
+
+  h1.headline{
+    font-family: var(--serif);
+    font-weight: 440;
+    font-size: clamp(34px, 4.4vw, 64px);
+    line-height: 1.14;
+    letter-spacing: -0.01em;
+    margin: 0 0 20px 0;
+    max-width: 20ch;
+  }
+  h1.headline em{
+    font-style: italic;
+    font-weight: 600;
+    color: var(--amber);
+  }
+
+  .sub{
+    font-family: var(--mono);
+    font-size: 15px;
+    color: var(--muted);
+    letter-spacing: .01em;
+    max-width: 46ch;
+  }
+
+  /* ---------- slide 1 : title ---------- */
+  #slide-1 .slide-inner{ position: relative; }
+  .mark{
+    position: absolute;
+    right: 0;
+    bottom: -60px;
+  }
+
+  /* ---------- slide 2 : problem, giant numeral ---------- */
+  .numeral{
+    position: absolute;
+    top: 50%;
+    right: -2vw;
+    transform: translateY(-50%);
+    font-family: var(--serif);
+    font-weight: 900;
+    font-size: clamp(160px, 26vw, 380px);
+    line-height: 1;
+    color: transparent;
+    -webkit-text-stroke: 1.5px var(--amber-dim);
+    z-index: -1;
+    user-select: none;
+  }
+  .cite{
+    display: block;
+    margin-top: 22px;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .cite::before{ content: "— "; }
+
+  /* ---------- slide 3 : screen reader bubble ---------- */
+  .sr-chip{
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 34px;
+    padding: 14px 20px;
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    background: var(--panel);
+    font-family: var(--mono);
+    font-size: 15px;
+    color: var(--muted);
+  }
+  .sr-chip .dot{
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--amber);
+    flex: none;
+  }
+  .sr-caption{
+    display: block;
+    margin-top: 14px;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--muted);
+    opacity: .7;
+  }
+
+  /* ---------- slide 4 : chart + pipeline ---------- */
+  .split{
+    display: flex;
+    align-items: center;
+    gap: 6vw;
+  }
+  .split .col-text{ flex: 0 0 auto; max-width: 30ch; }
+  .split .col-chart{ flex: 1 1 auto; min-width: 0; }
+
+  .chart-wrap{ position: relative; }
+  .chart-wrap svg{ width: 100%; height: auto; display: block; }
+  .chart-wrap .pt-label{
+    font-family: var(--mono);
+    font-size: 12px;
+    fill: var(--muted);
+  }
+  .chart-wrap .pt-value{
+    font-family: var(--mono);
+    font-size: 13px;
+    fill: var(--amber);
+    font-weight: 500;
+  }
+
+  .pipeline{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 40px;
+    font-family: var(--mono);
+    font-size: 13px;
+    letter-spacing: .08em;
+    color: var(--muted);
+    flex-wrap: wrap;
+  }
+  .pipeline .step{ color: var(--paper); }
+  .pipeline .arrow{ color: var(--amber); }
+
+  /* ---------- slide 5 : pulse patterns ---------- */
+  .pulse-row{
+    display: flex;
+    gap: 5vw;
+    margin-top: 56px;
+    flex-wrap: wrap;
+  }
+  .pulse-item{ display: flex; flex-direction: column; align-items: flex-start; gap: 16px; }
+  .pulse-icon{
+    height: 46px;
+    display: flex;
+    align-items: flex-end;
+    gap: 5px;
+  }
+  .pulse-icon .bar{
+    width: 9px;
+    background: var(--amber);
+    border-radius: 2px;
+  }
+  .pulse-name{ font-family: var(--mono); font-size: 13px; color: var(--paper); letter-spacing: .04em; }
+  .pulse-mean{ font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .pulse-ms{ font-family: var(--mono); font-size: 11px; color: var(--amber); opacity: .75; letter-spacing: .04em; }
+  .haptic-groups{ display: flex; gap: 7vw; margin-top: 52px; flex-wrap: wrap; }
+  .haptic-group .pulse-row{ margin-top: 0; }
+  .group-label{
+    display: block;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .22em;
+    color: var(--muted);
+    padding-bottom: 12px;
+    margin-bottom: 26px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  /* ---------- slide 6 : trust ---------- */
+  .trust-grid{
+    display: grid;
+    grid-template-columns: 1fr 1px 1fr;
+    gap: 5vw;
+    margin-top: 44px;
+    max-width: 980px;
+  }
+  .trust-grid .rule{ background: var(--rule); }
+  .trust-col .k{
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: .1em;
+    color: var(--amber);
+    display: block;
+    margin-bottom: 10px;
+  }
+  .trust-col p{
+    font-family: var(--serif);
+    font-size: 21px;
+    line-height: 1.4;
+    margin: 0;
+  }
+  .tags{
+    display: flex;
+    gap: 24px;
+    margin-top: 40px;
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: .12em;
+    color: var(--muted);
+  }
+  .tags span::before{ content: "· "; color: var(--amber); }
+
+  /* ---------- chrome ---------- */
+  .chrome{
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 26px 9vw;
+    z-index: 5;
+    pointer-events: none;
+  }
+  .counter{
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--muted);
+    letter-spacing: .06em;
+  }
+  .counter .cur{ color: var(--paper); }
+  .dots{ display: flex; gap: 10px; pointer-events: auto; }
+  .dots button{
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    border: 1px solid var(--muted);
+    background: transparent;
+    padding: 0;
+    cursor: pointer;
+  }
+  .dots button.on{ background: var(--amber); border-color: var(--amber); }
+  .dots button:focus-visible{ outline: 2px solid var(--amber); outline-offset: 3px; }
+
+  .edge{
+    position: fixed;
+    top: 0; bottom: 0;
+    width: 14%;
+    z-index: 4;
+    cursor: pointer;
+    background: transparent;
+    border: 0;
+  }
+  .edge-left{ left: 0; }
+  .edge-right{ right: 0; }
+
+  .sr-only{
+    position: absolute; width: 1px; height: 1px;
+    overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap;
+  }
+
+  @media (max-width: 860px){
+    .split{ flex-direction: column; align-items: flex-start; }
+    .trust-grid{ grid-template-columns: 1fr; }
+    .trust-grid .rule{ display: none; }
+    .edge{ width: 20%; }
+  }
+</style>
+</head>
+<body>
+  <div class="deck" id="deck">
+
+    <section class="slide" id="slide-1" data-index="0">
+      <div class="slide-inner">
+        <span class="eyebrow">GRAPH ACCESSIBILITY COPILOT</span>
+        <h1 class="headline">A chart is only information if you can see it.</h1>
+        <p class="sub">We built the exception.</p>
+        <div class="mark">
+          <div class="pulse-icon" aria-hidden="true">
+            <span class="bar" style="height:10px"></span>
+            <span class="bar" style="height:18px"></span>
+            <span class="bar" style="height:28px"></span>
+            <span class="bar" style="height:40px"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" id="slide-2" data-index="1">
+      <div class="numeral" aria-hidden="true">2.2B</div>
+      <div class="slide-inner">
+        <span class="eyebrow">THE GAP</span>
+        <h1 class="headline">2.2 billion people live with a vision impairment most dashboards were never built for.</h1>
+        <span class="cite">World Health Organization, World Report on Vision</span>
+      </div>
+    </section>
+
+    <section class="slide" id="slide-3" data-index="2">
+      <div class="slide-inner">
+        <span class="eyebrow">WHAT EXISTS TODAY</span>
+        <h1 class="headline">A screen reader can announce the caption. It never lets you feel where the line climbs, peaks or falls.</h1>
+        <div class="sr-chip">
+          <span class="dot" aria-hidden="true"></span>
+          "Chart: Unemployment Rate, 2016 to 2024."
+        </div>
+        <span class="sr-caption">— that's the entire announcement.</span>
+      </div>
+    </section>
+
+    <section class="slide" id="slide-4" data-index="3">
+      <div class="slide-inner split">
+        <div class="col-text">
+          <span class="eyebrow">WHAT WE BUILT</span>
+          <h1 class="headline">Point a camera at any chart. Hear the story. Feel the shape.</h1>
+          <div class="pipeline">
+            <span class="step">CAPTURE</span><span class="arrow">→</span>
+            <span class="step">CONFIRM</span><span class="arrow">→</span>
+            <span class="step">OVERVIEW</span><span class="arrow">→</span>
+            <span class="step">EXPLORE</span>
+          </div>
+        </div>
+        <div class="col-chart">
+          <div class="chart-wrap">
+            <svg viewBox="0 0 900 320" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Line chart of unemployment rate from 2016 to 2024, spiking to 8.1 percent in 2020 and falling to 4 percent by 2024">
+              <polyline points="40,210.7 142.5,237.3 245,264 347.5,274.7 450,40 552.5,184 655,274.7 757.5,280 860,258.7"
+                fill="none" stroke="#ffb200" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" />
+              <circle cx="40" cy="210.7" r="4.5" fill="#f2ede1" />
+              <circle cx="450" cy="40" r="5.5" fill="#ffb200" />
+              <circle cx="860" cy="258.7" r="4.5" fill="#f2ede1" />
+              <text x="40" y="300" class="pt-label">2016</text>
+              <text x="40" y="196" class="pt-value">4.9%</text>
+              <text x="450" y="28" class="pt-value" text-anchor="middle">8.1%</text>
+              <text x="450" y="300" class="pt-label" text-anchor="middle">2020</text>
+              <text x="860" y="300" class="pt-label" text-anchor="end">2024</text>
+              <text x="860" y="245" class="pt-value" text-anchor="end">4.0%</text>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" id="slide-5" data-index="4">
+      <div class="slide-inner">
+        <span class="eyebrow">TOUCH THE DATA</span>
+        <h1 class="headline">Every point on the curve becomes something you can feel.</h1>
+        <div class="haptic-groups">
+          <div class="haptic-group">
+            <span class="group-label">POSITION</span>
+            <div class="pulse-row">
+              <div class="pulse-item">
+                <div class="pulse-icon" aria-hidden="true"><span class="bar" style="width:52px;height:26px"></span></div>
+                <div><span class="pulse-name">CONSTANT</span><br /><span class="pulse-mean">you're on the curve</span></div>
+              </div>
+              <div class="pulse-item">
+                <div class="pulse-icon" aria-hidden="true" style="gap:0"><span class="bar" style="width:5px;height:26px;margin-left:0px"></span><span class="bar" style="width:5px;height:26px;margin-left:16px"></span><span class="bar" style="width:5px;height:26px;margin-left:10px"></span><span class="bar" style="width:5px;height:26px;margin-left:6px"></span><span class="bar" style="width:5px;height:26px;margin-left:3px"></span><span class="bar" style="width:5px;height:26px;margin-left:1px"></span></div>
+                <div><span class="pulse-name">PULSATING</span><br /><span class="pulse-mean">you're off the curve</span><br /><span class="pulse-ms">faster the closer you get</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="haptic-group">
+            <span class="group-label">DIRECTION</span>
+            <div class="pulse-row">
+              <div class="pulse-item">
+                <div class="pulse-icon"><svg width="46" height="46" viewBox="0 0 46 46" aria-hidden="true"><circle cx="23" cy="23" r="17" fill="none" stroke="#b3a996" stroke-opacity=".25"/><circle cx="23.0" cy="6.0" r="2" fill="#b3a996" opacity="0.45"/><circle cx="31.5" cy="8.3" r="3" fill="#ffb200" opacity="0.55"/><circle cx="37.7" cy="14.5" r="4.2" fill="#ffb200" opacity="1"/><circle cx="40.0" cy="23.0" r="3" fill="#ffb200" opacity="0.55"/><circle cx="37.7" cy="31.5" r="2" fill="#b3a996" opacity="0.45"/><circle cx="31.5" cy="37.7" r="2" fill="#b3a996" opacity="0.45"/><circle cx="23.0" cy="40.0" r="2" fill="#b3a996" opacity="0.45"/><circle cx="14.5" cy="37.7" r="2" fill="#b3a996" opacity="0.45"/><circle cx="8.3" cy="31.5" r="2" fill="#b3a996" opacity="0.45"/><circle cx="6.0" cy="23.0" r="2" fill="#b3a996" opacity="0.45"/><circle cx="8.3" cy="14.5" r="2" fill="#b3a996" opacity="0.45"/><circle cx="14.5" cy="8.3" r="2" fill="#b3a996" opacity="0.45"/></svg></div>
+                <div><span class="pulse-name">360° RING</span><br /><span class="pulse-mean">the side you should move toward<br />vibrates strongest</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" id="slide-6" data-index="5">
+      <div class="slide-inner">
+        <span class="eyebrow">WHY IT'S TRUSTWORTHY</span>
+        <h1 class="headline">If we're not sure, we say so — never a guess dressed up as fact.</h1>
+        <div class="trust-grid">
+          <div class="trust-col">
+            <span class="k">LOW CONFIDENCE</span>
+            <p>Confirm the label, or retake the photo.</p>
+          </div>
+          <div class="rule"></div>
+          <div class="trust-col">
+            <span class="k">NO HARDWARE</span>
+            <p>The ring is simulated. The experience doesn't stop.</p>
+          </div>
+        </div>
+        <div class="tags"><span>LIVE</span><span>CONTROLLED</span><span>FALLBACK</span></div>
+      </div>
+    </section>
+
+    <button class="edge edge-left" aria-label="Previous slide"></button>
+    <button class="edge edge-right" aria-label="Next slide"></button>
+
+    <nav class="chrome" aria-label="Slide navigation">
+      <div class="counter"><span class="cur" id="counterCurrent">01</span> / <span id="counterTotal">06</span></div>
+      <div class="dots" id="dots"></div>
+    </nav>
+
+    <div class="sr-only" aria-live="polite" id="live"></div>
+  </div>
+
+<script>
+  (function(){
+    var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+    var total = slides.length;
+    var current = 0;
+    var dotsWrap = document.getElementById('dots');
+    var counterCur = document.getElementById('counterCurrent');
+    var counterTotal = document.getElementById('counterTotal');
+    var live = document.getElementById('live');
+
+    counterTotal.textContent = String(total).padStart(2, '0');
+
+    slides.forEach(function(_, i){
+      var b = document.createElement('button');
+      b.setAttribute('aria-label', 'Go to slide ' + (i + 1));
+      b.addEventListener('click', function(){ goTo(i); });
+      dotsWrap.appendChild(b);
+    });
+    var dots = Array.prototype.slice.call(dotsWrap.children);
+
+    function render(){
+      slides.forEach(function(s, i){ s.classList.toggle('active', i === current); });
+      dots.forEach(function(d, i){ d.classList.toggle('on', i === current); });
+      counterCur.textContent = String(current + 1).padStart(2, '0');
+      var h = slides[current].querySelector('.headline');
+      live.textContent = 'Slide ' + (current + 1) + ' of ' + total + '. ' + (h ? h.textContent : '');
+    }
+
+    function goTo(i){
+      current = Math.max(0, Math.min(total - 1, i));
+      render();
+    }
+    function next(){ goTo(current + 1); }
+    function prev(){ goTo(current - 1); }
+
+    document.addEventListener('keydown', function(e){
+      if (['ArrowRight', 'ArrowDown', 'PageDown', ' '].indexOf(e.key) > -1){ e.preventDefault(); next(); }
+      if (['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace'].indexOf(e.key) > -1){ e.preventDefault(); prev(); }
+      if (e.key === 'Home'){ e.preventDefault(); goTo(0); }
+      if (e.key === 'End'){ e.preventDefault(); goTo(total - 1); }
+    });
+
+    document.querySelector('.edge-left').addEventListener('click', prev);
+    document.querySelector('.edge-right').addEventListener('click', next);
+
+    var touchStartX = null;
+    document.addEventListener('touchstart', function(e){ touchStartX = e.changedTouches[0].clientX; }, { passive: true });
+    document.addEventListener('touchend', function(e){
+      if (touchStartX === null) return;
+      var dx = e.changedTouches[0].clientX - touchStartX;
+      if (Math.abs(dx) > 50){ dx < 0 ? next() : prev(); }
+      touchStartX = null;
+    }, { passive: true });
+
+    render();
+  })();
+</script>
+</body>
+</html>
