@@ -1,0 +1,349 @@
+{
+  "overview": {
+    "text": "It spikes to 8.1 percent in 2020, then falls back to 4 percent by 2024.",
+    "caveats": []
+  },
+  "answers": {
+    "trend": {
+      "answer": "Spikes to 8.1 percent in 2020, then falls back to 4 percent by 2024.",
+      "highlight": [
+        {
+          "series": "Unemployment rate",
+          "index": 4
+        },
+        {
+          "series": "Unemployment rate",
+          "index": 0
+        },
+        {
+          "series": "Unemployment rate",
+          "index": 8
+        }
+      ],
+      "caveats": []
+    },
+    "max": {
+      "answer": "Highest: 8.1 percent, in 2020.",
+      "highlight": [
+        {
+          "series": "Unemployment rate",
+          "index": 4
+        }
+      ],
+      "caveats": []
+    },
+    "changes": {
+      "answer": "Low in 2019, peak in 2020, low in 2023.",
+      "highlight": [
+        {
+          "series": "Unemployment rate",
+          "index": 3
+        },
+        {
+          "series": "Unemployment rate",
+          "index": 4
+        },
+        {
+          "series": "Unemployment rate",
+          "index": 7
+        }
+      ],
+      "caveats": []
+    },
+    "compare": {
+      "answer": "This graph has only one series, so there is nothing to compare.",
+      "highlight": [],
+      "caveats": []
+    }
+  },
+  "series": [
+    {
+      "name": "Unemployment rate",
+      "intro": "Unemployment rate, in percent, 2016 to 2024.",
+      "points": [
+        {
+          "index": 0,
+          "x": "2016",
+          "value": 4.9,
+          "normalised": 0.2889,
+          "delta": null,
+          "changeStrength": 0.0,
+          "direction": "flat",
+          "isMax": false,
+          "isMin": false,
+          "isTurningPoint": false,
+          "lowConfidence": false,
+          "readout": "2016: 4.9.",
+          "explain": "2016, 4.9 percent. The start of the graph."
+        },
+        {
+          "index": 1,
+          "x": "2017",
+          "value": 4.4,
+          "normalised": 0.1778,
+          "delta": -0.5,
+          "changeStrength": 0.1111,
+          "direction": "down",
+          "isMax": false,
+          "isMin": false,
+          "isTurningPoint": false,
+          "lowConfidence": false,
+          "readout": "2017: 4.4.",
+          "explain": "2017, 4.4 percent, down 0.5 percentage points from 2016."
+        },
+        {
+          "index": 2,
+          "x": "2018",
+          "value": 3.9,
+          "normalised": 0.0667,
+          "delta": -0.5,
+          "changeStrength": 0.1111,
+          "direction": "down",
+          "isMax": false,
+          "isMin": false,
+          "isTurningPoint": false,
+          "lowConfidence": false,
+          "readout": "2018: 3.9.",
+          "explain": "2018, 3.9 percent, down 0.5 percentage points from 2017."
+        },
+        {
+          "index": 3,
+          "x": "2019",
+          "value": 3.7,
+          "normalised": 0.0222,
+          "delta": -0.2,
+          "changeStrength": 0.0444,
+          "direction": "down",
+          "isMax": false,
+          "isMin": false,
+          "isTurningPoint": true,
+          "lowConfidence": false,
+          "readout": "2019: 3.7, low point.",
+          "explain": "2019, 3.7 percent. A low point, down 0.2 percentage points from 2018; after this it rises."
+        },
+        {
+          "index": 4,
+          "x": "2020",
+          "value": 8.1,
+          "normalised": 1.0,
+          "delta": 4.4,
+          "changeStrength": 0.9778,
+          "direction": "up",
+          "isMax": true,
+          "isMin": false,
+          "isTurningPoint": true,
+          "lowConfidence": false,
+          "readout": "2020: 8.1, highest.",
+          "explain": "2020, 8.1 percent. The highest point, up 4.4 percentage points from 2019; after this it falls."
+        },
+        {
+          "index": 5,
+          "x": "2021",
+          "value": 5.4,
+          "normalised": 0.4,
+          "delta": -2.7,
+          "changeStrength": 0.6,
+          "direction": "down",
+          "isMax": false,
+          "isMin": false,
+          "isTurningPoint": false,
+          "lowConfidence": false,
+          "readout": "2021: 5.4.",
+          "explain": "2021, 5.4 percent, down 2.7 percentage points from 2020."
+        },
+        {
+          "index": 6,
+          "x": "2022",
+          "value": 3.7,
+          "normalised": 0.0222,
+          "delta": -1.7,
+          "changeStrength": 0.3778,
+          "direction": "down",
+          "isMax": false,
+          "isMin": false,
+          "isTurningPoint": false,
+          "lowConfidence": false,
+          "readout": "2022: 3.7.",
+          "explain": "2022, 3.7 percent, down 1.7 percentage points from 2021."
+        },
+        {
+          "index": 7,
+          "x": "2023",
+          "value": 3.6,
+          "normalised": 0.0,
+          "delta": -0.1,
+          "changeStrength": 0.0222,
+          "direction": "down",
+          "isMax": false,
+          "isMin": true,
+          "isTurningPoint": true,
+          "lowConfidence": false,
+          "readout": "2023: 3.6, lowest.",
+          "explain": "2023, 3.6 percent. The lowest point, down 0.1 percentage points from 2022; after this it rises."
+        },
+        {
+          "index": 8,
+          "x": "2024",
+          "value": 4.0,
+          "normalised": 0.0889,
+          "delta": 0.4,
+          "changeStrength": 0.0889,
+          "direction": "up",
+          "isMax": false,
+          "isMin": false,
+          "isTurningPoint": false,
+          "lowConfidence": false,
+          "readout": "2024: 4.",
+          "explain": "2024, 4 percent. The end of the graph, up 0.4 percentage points from 2023."
+        }
+      ],
+      "trace": [
+        {
+          "fromIndex": 0,
+          "toIndex": 1,
+          "startFraction": 0.0,
+          "endFraction": 0.125,
+          "angle": -28.1,
+          "strength": 0.1111,
+          "direction": "down",
+          "endsAtTurningPoint": false
+        },
+        {
+          "fromIndex": 1,
+          "toIndex": 2,
+          "startFraction": 0.125,
+          "endFraction": 0.25,
+          "angle": -28.1,
+          "strength": 0.1111,
+          "direction": "down",
+          "endsAtTurningPoint": false
+        },
+        {
+          "fromIndex": 2,
+          "toIndex": 3,
+          "startFraction": 0.25,
+          "endFraction": 0.375,
+          "angle": -12.0,
+          "strength": 0.0444,
+          "direction": "down",
+          "endsAtTurningPoint": true
+        },
+        {
+          "fromIndex": 3,
+          "toIndex": 4,
+          "startFraction": 0.375,
+          "endFraction": 0.5,
+          "angle": 78.0,
+          "strength": 0.9778,
+          "direction": "up",
+          "endsAtTurningPoint": true
+        },
+        {
+          "fromIndex": 4,
+          "toIndex": 5,
+          "startFraction": 0.5,
+          "endFraction": 0.625,
+          "angle": -70.9,
+          "strength": 0.6,
+          "direction": "down",
+          "endsAtTurningPoint": false
+        },
+        {
+          "fromIndex": 5,
+          "toIndex": 6,
+          "startFraction": 0.625,
+          "endFraction": 0.75,
+          "angle": -61.1,
+          "strength": 0.3778,
+          "direction": "down",
+          "endsAtTurningPoint": false
+        },
+        {
+          "fromIndex": 6,
+          "toIndex": 7,
+          "startFraction": 0.75,
+          "endFraction": 0.875,
+          "angle": -6.1,
+          "strength": 0.0222,
+          "direction": "down",
+          "endsAtTurningPoint": true
+        },
+        {
+          "fromIndex": 7,
+          "toIndex": 8,
+          "startFraction": 0.875,
+          "endFraction": 1.0,
+          "angle": 23.1,
+          "strength": 0.0889,
+          "direction": "up",
+          "endsAtTurningPoint": false
+        }
+      ],
+      "interestPoints": [
+        {
+          "index": 0,
+          "x": "2016",
+          "value": 4.9,
+          "xFraction": 0.0,
+          "normalised": 0.2889,
+          "kinds": [
+            "start"
+          ],
+          "explain": "2016, 4.9 percent. The start of the graph."
+        },
+        {
+          "index": 3,
+          "x": "2019",
+          "value": 3.7,
+          "xFraction": 0.375,
+          "normalised": 0.0222,
+          "kinds": [
+            "low"
+          ],
+          "explain": "2019, 3.7 percent. A low point, down 0.2 percentage points from 2018; after this it rises."
+        },
+        {
+          "index": 4,
+          "x": "2020",
+          "value": 8.1,
+          "xFraction": 0.5,
+          "normalised": 1.0,
+          "kinds": [
+            "max",
+            "peak"
+          ],
+          "explain": "2020, 8.1 percent. The highest point, up 4.4 percentage points from 2019; after this it falls."
+        },
+        {
+          "index": 7,
+          "x": "2023",
+          "value": 3.6,
+          "xFraction": 0.875,
+          "normalised": 0.0,
+          "kinds": [
+            "min",
+            "low"
+          ],
+          "explain": "2023, 3.6 percent. The lowest point, down 0.1 percentage points from 2022; after this it rises."
+        },
+        {
+          "index": 8,
+          "x": "2024",
+          "value": 4.0,
+          "xFraction": 1.0,
+          "normalised": 0.0889,
+          "kinds": [
+            "end"
+          ],
+          "explain": "2024, 4 percent. The end of the graph, up 0.4 percentage points from 2023."
+        }
+      ]
+    }
+  ],
+  "range": {
+    "min": 3.6,
+    "max": 8.1
+  },
+  "lowConfidence": false,
+  "phrasing": "template"
+}
