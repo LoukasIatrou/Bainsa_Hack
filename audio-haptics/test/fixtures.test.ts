@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import assert from 'node:assert/strict';
 
-import type { ExtractionResponse, GraphData } from '../src/types.js';
+import type { ExtractionResponse, GraphData, ReasoningResponse } from '../src/types.js';
 import {
   describeExtractionStatus,
   describeFieldsNeedingConfirmation,
@@ -244,6 +244,108 @@ console.log("\nscenario: unemployment_us (percent unit, sharp spike)");
     assert.ok(describePoint(graph, 0, 0, res.fieldConfidence).startsWith('2016,')));
   check('all spoken strings are clean', () =>
     everySpokenString(res).forEach((t, i) => assertSpeakable(t, `unemp[${i}]`)));
+}
+
+// ---------------------------------------------------------------------------
+// Person 2's REAL /reason output, copied from their branch's
+// contracts/examples/. Guards the contract seam between their endpoint and this
+// engine: if their payload shape moves, this fails here rather than on stage.
+// ---------------------------------------------------------------------------
+
+console.log("\nPerson 2's real ReasoningResponse");
+{
+  const reasoning = JSON.parse(
+    readFileSync(join(here, 'fixtures', 'reason-unemployment.json'), 'utf8'),
+  ) as ReasoningResponse;
+  const graph = loadLocal('unemployment_us').graph as GraphData;
+  const points = reasoning.series[0]!.points;
+
+  check('every field this engine reads is present', () => {
+    for (const key of ['overview', 'answers', 'series', 'range', 'lowConfidence', 'phrasing']) {
+      assert.ok(key in reasoning, `missing top-level "${key}"`);
+    }
+    for (const p of points) {
+      for (const key of ['index', 'x', 'value', 'normalised', 'changeStrength',
+        'direction', 'isMax', 'isMin', 'isTurningPoint', 'readout']) {
+        assert.ok(key in p, `point ${p.index} missing "${key}"`);
+      }
+    }
+  });
+
+  check('all four preset answers exist with highlight and caveats', () => {
+    for (const q of ['trend', 'max', 'changes', 'compare'] as const) {
+      const a = reasoning.answers[q];
+      assert.ok(a, `missing answer "${q}"`);
+      assert.equal(typeof a.answer, 'string');
+      assert.ok(Array.isArray(a.highlight), `${q}.highlight is not an array`);
+      assert.ok(Array.isArray(a.caveats), `${q}.caveats is not an array`);
+    }
+  });
+
+  check('series names match the graph, so name-keyed lookup resolves', () => {
+    for (const s of reasoning.series) {
+      assert.ok(
+        graph.series.some((g) => g.name === s.name),
+        `/reason series "${s.name}" has no match in the graph`,
+      );
+    }
+  });
+
+  check('highlight series names resolve to a real series', () => {
+    for (const q of ['trend', 'max', 'changes', 'compare'] as const) {
+      for (const h of reasoning.answers[q].highlight) {
+        assert.ok(
+          graph.series.some((g) => g.name === h.series),
+          `highlight in "${q}" names unknown series "${h.series}"`,
+        );
+      }
+    }
+  });
+
+  check('point indices align with the graph x-axis', () =>
+    points.forEach((p, i) => {
+      assert.equal(p.index, i, `point ${i} has index ${p.index}`);
+      assert.equal(p.x, graph.xAxis.values[i]);
+      assert.equal(p.value, graph.series[0]!.values[i]);
+    }));
+
+  check('normalised stays within 0-1, so pitch mapping cannot go out of range', () =>
+    points.forEach((p) => {
+      if (p.normalised === null) return;
+      assert.ok(p.normalised >= 0 && p.normalised <= 1, `normalised ${p.normalised}`);
+    }));
+
+  check('changeStrength stays within 0-1', () =>
+    points.forEach((p) => {
+      if (p.changeStrength === null) return;
+      assert.ok(p.changeStrength >= 0 && p.changeStrength <= 1, `changeStrength ${p.changeStrength}`);
+    }));
+
+  check('direction is one of the four values the engine switches on', () =>
+    points.forEach((p) =>
+      assert.ok(['up', 'down', 'flat', 'unknown'].includes(p.direction), p.direction)));
+
+  check('the 2020 spike is flagged isMax, which selects the double pulse', () => {
+    const spike = points[4]!;
+    assert.equal(spike.x, '2020');
+    assert.equal(spike.isMax, true);
+    assert.equal(spike.normalised, 1);
+  });
+
+  check('the 2019 trough is flagged isTurningPoint', () => {
+    assert.equal(points[3]!.x, '2019');
+    assert.equal(points[3]!.isTurningPoint, true);
+  });
+
+  check('every readout is speakable', () =>
+    points.forEach((p) => assertSpeakable(p.readout, `readout[${p.index}]`)));
+
+  check('overview and answers are speakable', () => {
+    assertSpeakable(reasoning.overview.text, 'overview');
+    for (const q of ['trend', 'max', 'changes', 'compare'] as const) {
+      assertSpeakable(reasoning.answers[q].answer, q);
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
