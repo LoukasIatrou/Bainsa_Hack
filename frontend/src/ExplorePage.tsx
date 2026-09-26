@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { engine, fromPointerEvent, normalise, pointCount, valueRange } from './engine'
 import type { EngineStatus, GuidanceReading, HapticPatternName } from './engine'
-import { linePath } from './engine/curve'
 import { installMenu, installWalkGuard } from './engine/menu'
 import type { PlotBox } from './engine/curve'
+import { runsCurve, runsPath, smoothRuns } from './engine/smooth'
 import { EngineRing } from './spiderSense/EngineRing'
-import type { RingPhase } from './spiderSense/EngineRing'
+import { INITIAL_STATE, stepSpiderSense } from './spiderSense/logic'
+import type { Curve, Point, SpiderSenseState } from './spiderSense/logic'
 import './spiderSense/spiderSense.css'
 import type { FieldConfidence, GraphData, ReasoningResponse } from './types'
 
@@ -25,10 +26,11 @@ interface ExplorePageProps {
 }
 
 // Plot inner box padding inside the framed panel (room for the faint labels).
-const PAD = { left: 38, right: 16, top: 14, bottom: 24 }
+// Top/bottom room so the ring isn't cut off at the highest and lowest points.
+const PAD = { left: 38, right: 24, top: 36, bottom: 34 }
 const SOURCE_LABEL: Record<GraphSource, string> = { live: 'Live', controlled: 'Controlled', saved: 'Saved' }
 const MENU_HINTS = 'swipe → ↓ next · swipe ← ↑ previous · tap: choose · long press: repeat · 2-finger tap: graph'
-const GRAPH_HINTS = 'drag: trace the line · tap: read point · long press: explain point · 2-finger tap: menu'
+const GRAPH_HINTS = 'move / drag: follow the ring from the start · tap: read point · long press: explain point · 2-finger tap: menu'
 
 interface Finger {
   // Normalised data space: x 0..1 across the plot inner box, y 0..1 bottom to top.
@@ -57,6 +59,15 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
   const [lastSpoken, setLastSpoken] = useState('')
   const [lastPattern, setLastPattern] = useState<HapticPatternName | null>(null)
   const [helpOpen, setHelpOpen] = useState(false)
+  // The ring follows the pointer (mouse hover or finger) and always shows the way along the line.
+  // Tagged with the curve it was computed on: a new curve (resize, series switch) starts over.
+  const [senseState, setSenseState] = useState<{ curve: Curve | null; s: SpiderSenseState }>({
+    curve: null,
+    s: INITIAL_STATE,
+  })
+  const senseRef = useRef(senseState)
+  const pointerRef = useRef<Point | null>(null)
+  const stepRef = useRef<(p: Point | null) => void>(() => {})
   const [loaded, setLoaded] = useState(false)
   const started = useRef(false)
 
@@ -120,12 +131,12 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
     installMenu()
     engine.setMode('menu')
     const intro = (notice: string) => {
+      // Straight into the graph: the ring points to the start of the line, then along it.
+      engine.setMode('graph')
       engine.speech.speak(
-        `${notice}${graph.title}. Menu: swipe to move, tap to choose. Two-finger tap switches to the graph.`,
+        `${notice}${graph.title}. Follow the ring to the start of the line. Two-finger tap opens the menu.`,
         'interrupt',
       )
-      const first = engine.menu.current
-      if (first) engine.speech.speak(`${first.label}. 1 of ${engine.menu.position.total}.`, 'normal')
       setLoaded(true)
     }
     // The frontend types follow contracts/reasoning-response.schema.json; Person 3's copy of that
@@ -159,6 +170,8 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
     let active: number | null = null
     // Drawing only: the engine does the guidance itself from its drag gesture.
     const draw = (e: PointerEvent) => {
+      const r = el.getBoundingClientRect()
+      stepRef.current({ x: e.clientX - r.left, y: e.clientY - r.top })
       if (modeRef.current !== 'graph') return
       const f = toData(e.clientX, e.clientY)
       setFinger(f)
@@ -177,15 +190,19 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
     }
     const move = (e: PointerEvent) => {
       engine.gestures.pointerMove(e)
-      if (e.pointerId === active) draw(e)
+      // A mouse is the simulated ring: it steers on hover too, no button needed.
+      if (e.pointerId === active || (active === null && e.pointerType === 'mouse')) draw(e)
     }
     const end = (e: PointerEvent, cancel: boolean) => {
       if (cancel) engine.gestures.pointerCancel(e)
       else engine.gestures.pointerUp(e)
       if (e.pointerId === active) {
         active = null
-        setFinger(null)
-        setReading(null)
+        // Lifting keeps the ring where it was, so it is always visible.
+        if (e.pointerType !== 'mouse') {
+          setFinger(null)
+          setReading(null)
+        }
       }
     }
     const up = (e: PointerEvent) => end(e, false)
@@ -211,61 +228,54 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
     () => (series && range ? series.values.map((v) => (v === null ? null : normalise(v, range.min, range.max))) : []),
     [series, range],
   )
-  const path = useMemo(() => (box ? linePath(ys, box) : ''), [ys, box])
+  const runs = useMemo(() => (box ? smoothRuns(ys, box) : []), [ys, box])
+  const path = useMemo(() => runsPath(runs), [runs])
+  const curve = useMemo(() => (runs.length ? runsCurve(runs) : null), [runs])
   const px = (x: number) => (box ? box.left + x * box.width : 0)
   const py = (y: number) => (box ? box.top + (1 - y) * box.height : 0)
   const xAt = (i: number) => (n > 1 ? i / (n - 1) : 0.5)
 
-  // --- ring from the engine's guidance reading + target ---------------------
+  // --- ring: Nico's spider-sense logic on the smooth line ---------------------
+  // Before the line is picked up it points to the START; on the line it points ALONG it toward
+  // the end (or toward the engine's Explain target); off the line it points back to where the
+  // finger left. Speech and buzz still come from Person 3's engine.
   const target = status.targetIndex
   const targetValue = target !== null ? (ys[target] ?? null) : null
-  let ring: { x: number; y: number; angle: number | null; distance: number | null; phase: RingPhase } | null = null
-  let contact: { x: number; y: number } | null = null
-  let reached: number | null = null
-  if (finger && box && reading) {
-    const fx = px(finger.x)
-    const fy = py(finger.y)
-    let angle: number | null = null
-    let distance: number | null = null
-    let phase: RingPhase = 'searching'
-    if (reading.state === 'on-curve' && reading.curveY !== null) {
-      phase = 'on-curve'
-      contact = { x: fx, y: py(reading.curveY) }
-      if (Math.abs(finger.x - xAt(reading.index)) * (n - 1) < 0.3 && ys[reading.index] !== null) reached = reading.index
-      // Along the segment under the finger, toward the target if there is one.
-      const i = Math.min(n - 2, Math.max(0, Math.floor(finger.x * (n - 1))))
-      const a = ys[i]
-      const b = ys[i + 1]
-      const tangent =
-        a !== null && a !== undefined && b !== null && b !== undefined
-          ? Math.atan2(-(b - a) * box.height, box.width / Math.max(1, n - 1))
-          : 0
-      if (target !== null && reading.index === target) {
-        phase = 'arrived'
-        distance = 0
-      } else if (target !== null) {
-        angle = xAt(target) < finger.x ? tangent + Math.PI : tangent
-        distance = Math.abs(xAt(target) - finger.x) * box.width
-      } else {
-        angle = finger.x >= 0.995 ? null : tangent
-        distance = 0
-      }
-    } else if (reading.state === 'off-chart') {
-      angle = Math.atan2(py(0.5) - fy, px(0.5) - fx)
-      distance = 300
-    } else if (target !== null && targetValue !== null) {
-      const tx = px(xAt(target))
-      const ty = py(targetValue)
-      angle = Math.atan2(ty - fy, tx - fx)
-      distance = Math.hypot(tx - fx, ty - fy)
-    } else if (reading.push !== 'none') {
-      // Same direction the engine's rising / falling pulse is giving.
-      angle = reading.push === 'up' ? -Math.PI / 2 : Math.PI / 2
-      distance = Math.abs(reading.delta ?? 1) * box.height
-    }
-    ring = { x: fx, y: fy, angle, distance, phase }
-  }
+  const startPoint = runs.length ? runs[0][0] : null
+  const lastRun = runs.length ? runs[runs.length - 1] : null
+  const endPoint = lastRun ? lastRun[lastRun.length - 1] : null
+  const goal: Point | null = target !== null && targetValue !== null ? { x: px(xAt(target)), y: py(targetValue) } : endPoint
   const ringRadius = size ? Math.min(60, Math.max(40, size.h * 0.14)) : 50
+
+  // Rebuilt each render (after commit) so pointer events always step with the current curve/goal.
+  useEffect(() => {
+    stepRef.current = (p: Point | null) => {
+      pointerRef.current = p
+      if (!curve) return
+      const prev = senseRef.current.curve === curve ? senseRef.current.s : INITIAL_STATE
+      const next = stepSpiderSense(prev, p, curve, ringRadius, { guideTo: goal, startAt: startPoint })
+      if (next.goalReached && !prev.goalReached && target === null) {
+        engine.speech.speak('End of graph.', 'interrupt')
+      }
+      senseRef.current = { curve, s: next }
+      setSenseState(senseRef.current)
+    }
+  })
+
+  const sense = senseState.curve === curve ? senseState.s : INITIAL_STATE
+
+  const contact = sense.lastContact
+  const reached = sense.goalReached && target !== null ? target : null
+  const ring =
+    sense.pointer && box
+      ? {
+          x: sense.pointer.x,
+          y: sense.pointer.y,
+          angle: sense.angle,
+          distance: sense.distance,
+          phase: (sense.goalReached ? 'arrived' : sense.phase) as 'searching' | 'on-curve' | 'arrived',
+        }
+      : null
 
   // --- status line ---------------------------------------------------------
   const parts = ['simulated ring']
@@ -273,16 +283,18 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
     parts.push(`menu: ${status.menuItem ?? '-'} (${status.menuPosition.index + 1}/${status.menuPosition.total})`)
   } else {
     parts.push('graph')
+    parts.push(
+      sense.pointer === null
+        ? 'move to start'
+        : sense.goalReached
+          ? target === null ? 'end of graph' : 'on the point'
+          : sense.phase === 'on-curve'
+            ? 'on line, follow it'
+            : sense.lastContact === null
+              ? 'go to the start'
+              : 'back to the line',
+    )
     if (reading && finger) {
-      parts.push(
-        reading.state === 'on-curve'
-          ? 'on line'
-          : reading.state === 'off-chart'
-            ? 'off chart'
-            : reading.curveY === null
-              ? 'gap'
-              : `searching ${reading.push}`,
-      )
       if (reading.state !== 'off-chart') {
         parts.push(`${graph.xAxis.values[reading.index] ?? ''}: ${fmt(series?.values[reading.index], graph.yAxis.unit)}`)
       }
@@ -347,6 +359,9 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
               ))}
             </g>
             <path className="explore__curve" d={path} data-testid="curve" />
+            {sense.lastContact === null && startPoint && (
+              <circle className="explore__target" cx={startPoint.x} cy={startPoint.y} r={7} data-testid="start" />
+            )}
             {target !== null && targetValue !== null && (
               <circle
                 className="explore__target"

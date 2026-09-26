@@ -205,6 +205,9 @@ export function curveYAt(curve: Curve, x: number): number {
 export interface StepOptions {
   // A goal on the curve (Overview start, next interest point). Switches to guided mode.
   guideTo?: Point | null
+  // Where the line must first be picked up. Until then the ring points here, and touching the
+  // line anywhere else doesn't count - so exploring always starts from the start.
+  startAt?: Point | null
 }
 
 // Contact within this fraction of the radius from the goal counts as arrived.
@@ -268,6 +271,12 @@ export function stepSpiderSense(
       atEnd,
       goalReached,
     }
+  }
+
+  const start = options.startAt ?? null
+  if (start && prev.lastContact === null) {
+    if (dist(pointer, start) <= radius) return onCurve(nearestCurvePoint(curve, pointer, 0, window))
+    return toward(start, pointer, prev, mode)
   }
 
   if (curveInside && (local || prev.lastContact === null)) return onCurve(nearest)
