@@ -11,8 +11,8 @@
       "description": "ok: safe to show without warning. low_confidence: show confirmation/correction UI before Overview. error: extraction failed, prompt retake/upload."
     },
     "graph": {
-      "description": "Present when status is ok or low_confidence. Shape defined in graph-data.schema.json.",
-      "$ref": "./graph-data.schema.json"
+      "description": "Present when status is ok or low_confidence; null when status is error. Shape defined in graph-data.schema.json.",
+      "anyOf": [{ "$ref": "./graph-data.schema.json" }, { "type": "null" }]
     },
     "fieldConfidence": {
       "type": ["object", "null"],

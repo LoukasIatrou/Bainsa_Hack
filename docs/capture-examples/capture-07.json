@@ -1,0 +1,68 @@
+{
+  "status": "ok",
+  "graph": {
+    "graphType": "line",
+    "title": "Untitled line graph",
+    "xAxis": {
+      "label": "",
+      "values": [
+        "Poker",
+        "Blackjack",
+        "Bridge",
+        "Gin",
+        "Cribbage",
+        "Hearts",
+        "Canasta",
+        "Pinochle",
+        "Euchre",
+        "Spades"
+      ]
+    },
+    "yAxis": {
+      "label": "Number of Players",
+      "unit": null
+    },
+    "series": [
+      {
+        "name": "Wednesday",
+        "values": [
+          1000.0,
+          1500.0,
+          2000.0,
+          2500.0,
+          3000.0,
+          3500.0,
+          4500.0,
+          6000.0,
+          7000.0,
+          7500.0
+        ]
+      },
+      {
+        "name": "Sunday",
+        "values": [
+          500.0,
+          1000.0,
+          1500.0,
+          2000.0,
+          2500.0,
+          3000.0,
+          3500.0,
+          4000.0,
+          5000.0,
+          6000.0
+        ]
+      }
+    ],
+    "summary": "The graph illustrates the number of players for different card games on Wednesday and Sunday, showing that Wednesday consistently had more players than Sunday for all games, with player numbers generally increasing across the card games listed for both days.",
+    "confidence": 0.9
+  },
+  "fieldConfidence": {
+    "graphType": 1.0,
+    "title": 1.0,
+    "xAxis": 0.9,
+    "yAxis": 0.9,
+    "series": 0.9
+  },
+  "message": null
+}

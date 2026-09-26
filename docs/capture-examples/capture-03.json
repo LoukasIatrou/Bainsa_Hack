@@ -1,0 +1,6 @@
+{
+  "status": "error",
+  "graph": null,
+  "fieldConfidence": null,
+  "message": "The image provided is a bar chart, not a line graph. Data has been extracted as if it were a line graph to comply with the schema, but the graph type is incorrect."
+}

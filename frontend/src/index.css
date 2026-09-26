@@ -61,3 +61,119 @@ body {
   background: rgba(0, 0, 0, 0.6);
   pointer-events: none;
 }
+
+.exploration-screen {
+  height: 100svh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.5rem;
+  text-align: center;
+}
+
+.series-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.series-tab {
+  padding: 0.75rem 1.25rem;
+  font-size: 1rem;
+  border: 2px solid currentColor;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.series-tab[aria-pressed='true'] {
+  background: #ffd400;
+  border-color: #ffd400;
+  color: #111;
+}
+
+.ring {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ring-track {
+  position: relative;
+  width: 200px;
+  height: 200px;
+  border-radius: 50%;
+  border: 4px solid currentColor;
+}
+
+.ring-dot {
+  position: absolute;
+  inset: 0;
+  transition: transform 0.2s ease-out;
+}
+
+.ring-dot::after {
+  content: '';
+  position: absolute;
+  top: -8px;
+  left: calc(50% - 8px);
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ffd400;
+}
+
+.ring-pulse {
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 4px solid transparent;
+  pointer-events: none;
+}
+
+.ring-pulse--rising {
+  border-color: #4caf50;
+  animation: ring-pulse-grow 0.4s ease-out;
+}
+
+.ring-pulse--falling {
+  border-color: #e53935;
+  animation: ring-pulse-shrink 0.4s ease-out;
+}
+
+.ring-pulse--flat {
+  border-color: #999;
+}
+
+@keyframes ring-pulse-grow {
+  from {
+    transform: scale(0.85);
+    opacity: 0.8;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes ring-pulse-shrink {
+  from {
+    transform: scale(1.15);
+    opacity: 0.8;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.point-slider {
+  width: 100%;
+  max-width: 480px;
+  height: 3rem;
+}

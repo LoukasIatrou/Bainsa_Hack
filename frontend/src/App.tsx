@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { extractGraph } from './api'
 import { Capture } from './Capture'
+import { Exploration } from './Exploration'
+import { announce } from './speech'
 import type { ExtractionResponse } from './types'
 
-type AppState = 'capture' | 'processing' | 'result'
+type AppState = 'capture' | 'processing' | 'result' | 'explore'
 
 function App() {
   const [state, setState] = useState<AppState>('capture')
@@ -19,8 +21,18 @@ function App() {
     try {
       const response = await extractGraph(image)
       setResult(response)
+
+      if (response.status === 'ok') {
+        announce(response.graph?.summary ?? 'Extraction complete.')
+      } else if (response.status === 'low_confidence') {
+        announce(`Extraction complete, but confidence is low. ${response.message ?? 'Please review the result.'}`)
+      } else {
+        announce(response.message ?? 'Extraction failed. Please retake the photo.')
+      }
     } catch (err) {
-      setRequestError(err instanceof Error ? err.message : 'Request failed.')
+      const message = err instanceof Error ? err.message : 'Request failed.'
+      setRequestError(message)
+      announce(`Request failed. ${message}`)
     } finally {
       setState('result')
     }
@@ -58,6 +70,12 @@ function App() {
               </p>
               {result?.message && <p>Message: {result.message}</p>}
               <pre>{JSON.stringify(result, null, 2)}</pre>
+
+              {result?.graph && (
+                <button type="button" onClick={() => setState('explore')}>
+                  Explore graph
+                </button>
+              )}
             </>
           )}
 
@@ -65,6 +83,10 @@ function App() {
             Reset
           </button>
         </div>
+      )}
+
+      {state === 'explore' && result?.graph && (
+        <Exploration graph={result.graph} onBack={() => setState('result')} />
       )}
     </main>
   )

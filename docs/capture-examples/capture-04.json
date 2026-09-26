@@ -1,0 +1,51 @@
+{
+  "status": "ok",
+  "graph": {
+    "graphType": "line",
+    "title": "Rainfall during the first 9 days of a month",
+    "xAxis": {
+      "label": "Day of the month",
+      "values": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9"
+      ]
+    },
+    "yAxis": {
+      "label": "Rainfall",
+      "unit": null
+    },
+    "series": [
+      {
+        "name": "Rainfall",
+        "values": [
+          5.0,
+          2.0,
+          6.0,
+          8.0,
+          12.0,
+          8.0,
+          6.0,
+          2.0,
+          6.0
+        ]
+      }
+    ],
+    "summary": "Rainfall fluctuated significantly over the first 9 days of the month, reaching a peak on day 5 before generally decreasing and then rising again.",
+    "confidence": 1.0
+  },
+  "fieldConfidence": {
+    "graphType": 1.0,
+    "title": 1.0,
+    "xAxis": 1.0,
+    "yAxis": 1.0,
+    "series": 1.0
+  },
+  "message": null
+}
