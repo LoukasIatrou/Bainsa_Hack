@@ -552,6 +552,92 @@ export class AudioHapticEngine {
     this.broadcastStatus();
   }
 
+  /**
+   * Objectively check that audio and haptics can actually work here, before
+   * trusting them on stage.
+   *
+   * The sound check taps the master output with an AnalyserNode and measures
+   * the real signal level, so it proves the engine is emitting audio even when
+   * the listener hears nothing -- which separates "the code is broken" from
+   * "the output device is wrong", the two failures that look identical.
+   *
+   * Must be called from a user gesture, like everything else that needs audio.
+   */
+  async selfTest(): Promise<{
+    audioUnlocked: boolean;
+    audioSignalLevel: number;
+    audioProducingSound: boolean;
+    speechVoices: number;
+    speechUsable: boolean;
+    vibrationApi: boolean;
+    activeTransports: string[];
+    problems: string[];
+  }> {
+    const problems: string[] = [];
+    const audioUnlocked = await this.unlock();
+    if (!audioUnlocked) problems.push('Audio is blocked: call unlock() from a click or keypress.');
+
+    let level = 0;
+    const ctx = this.sonifier.getContext();
+    const master = this.sonifier.getMaster();
+    if (ctx && master) {
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      master.connect(analyser);
+      const buffer = new Float32Array(analyser.fftSize);
+
+      this.sonifier.tone(440, 400, { gain: 0.9 });
+      await new Promise((resolve) => setTimeout(resolve, 180));
+      analyser.getFloatTimeDomainData(buffer);
+      let sum = 0;
+      for (const v of buffer) sum += v * v;
+      level = Math.sqrt(sum / buffer.length);
+
+      master.disconnect(analyser);
+    } else {
+      problems.push('No AudioContext: Web Audio is unavailable in this browser.');
+    }
+
+    const producing = level > 0.01;
+    if (audioUnlocked && !producing) {
+      problems.push('Audio context is running but no signal reached the output.');
+    }
+    if (producing) {
+      problems.push(
+        'Engine is emitting sound. If you hear nothing, the output device is wrong '
+        + '-- check which sink your system is playing to, and the volume.',
+      );
+    }
+
+    const voices = this.speech.voiceCount;
+    if (!this.speech.supported) {
+      problems.push('No SpeechSynthesis API in this browser.');
+    } else if (voices === 0) {
+      problems.push(
+        'SpeechSynthesis reports ZERO voices, so speech will be silent. '
+        + 'Electron shells and some Linux builds do this. Use Google Chrome, '
+        + 'or test on the phone.',
+      );
+    }
+
+    const vibrationApi = typeof navigator !== 'undefined'
+      && typeof navigator.vibrate === 'function';
+    if (!vibrationApi) {
+      problems.push('No Vibration API: haptics fall back to the simulator and audio buzz.');
+    }
+
+    return {
+      audioUnlocked,
+      audioSignalLevel: Number(level.toFixed(5)),
+      audioProducingSound: producing,
+      speechVoices: voices,
+      speechUsable: this.speech.usable,
+      vibrationApi,
+      activeTransports: this.haptics.getActiveTransports(),
+      problems,
+    };
+  }
+
   getStatus(): EngineStatus {
     return {
       audioUnlocked: this.sonifier.unlocked,
@@ -563,6 +649,8 @@ export class AudioHapticEngine {
       hasGraph: this.graph !== null,
       extractionStatus: this.extractionStatus,
       hasReasoning: this.reasoning !== null,
+      speechVoices: this.speech.voiceCount,
+      speechUsable: this.speech.usable,
       guiding: this.guidance.isActive,
       targetIndex: this.guidance.getTarget(),
     };

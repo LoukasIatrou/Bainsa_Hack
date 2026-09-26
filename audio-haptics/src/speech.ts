@@ -114,6 +114,23 @@ export class SpeechQueue {
     return this.synth !== null;
   }
 
+  /**
+   * How many voices the platform actually offers.
+   *
+   * `'speechSynthesis' in window` is not enough: Electron shells and some Linux
+   * Chromium builds expose the API with **zero voices**, so speak() resolves
+   * happily and emits no sound. A demo that fails this silently is the worst
+   * possible failure, so report it.
+   */
+  get voiceCount(): number {
+    return this.synth?.getVoices().length ?? 0;
+  }
+
+  /** Supported *and* actually able to make a sound. */
+  get usable(): boolean {
+    return this.synth !== null && this.voiceCount > 0;
+  }
+
   get speaking(): boolean {
     return this.current !== null;
   }

@@ -146,6 +146,24 @@ $('unlock').addEventListener('click', async () => {
 
 $('testPattern').addEventListener('click', () => engine.playPattern('double'));
 
+$('diagnose').addEventListener('click', async () => {
+  const out = $('diagnostic');
+  out.style.display = 'block';
+  out.textContent = 'Running…';
+  const r = await engine.selfTest();
+  const yn = (ok: boolean) => (ok ? 'YES' : 'NO');
+  out.textContent = [
+    `Audio unlocked        ${yn(r.audioUnlocked)}`,
+    `Engine emitting sound ${yn(r.audioProducingSound)}   (signal level ${r.audioSignalLevel})`,
+    `Speech voices         ${r.speechVoices}`,
+    `Speech will be heard  ${yn(r.speechUsable)}`,
+    `Vibration API         ${yn(r.vibrationApi)}`,
+    `Haptic channels       ${r.activeTransports.join(', ') || 'none'}`,
+    '',
+    ...r.problems.map((p) => `• ${p}`),
+  ].join('\n');
+});
+
 for (const button of document.querySelectorAll<HTMLButtonElement>('[data-scenario]')) {
   button.addEventListener('click', async () => {
     const scenario = button.dataset.scenario!;

@@ -142,6 +142,10 @@ export interface EngineStatus {
   extractionStatus: ExtractionStatus | null;
   /** True once Person 2's /reason result has been supplied via setReasoning(). */
   hasReasoning: boolean;
+  /** Number of TTS voices available. Zero means speech will be silent. */
+  speechVoices: number;
+  /** False when speech cannot actually produce sound on this device. */
+  speechUsable: boolean;
   /** True while the Explore page's haptic curve-following is running. */
   guiding: boolean;
   /** The point of interest the user is currently being steered toward. */
