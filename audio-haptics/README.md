@@ -80,6 +80,42 @@ demo still runs if `/reason` is down. `setGraph` and `handleExtraction` both
 clear stale reasoning — call `setReasoning` again after any user correction,
 since `/reason` has to be re-run anyway.
 
+## Explore page: the four buttons
+
+The Explore page is driven by touch — the user drags a finger over the chart and
+is steered onto the curve by vibration, rather than stepping through points with
+arrow keys.
+
+```ts
+import { fromPointerEvent } from '@bainsa/audio-haptics';
+
+chartEl.addEventListener('pointermove', (event) => {
+  const { x, y } = fromPointerEvent(event, chartEl);
+  engine.guide(x, y);              // throttles internally; call on every move
+});
+
+overviewBtn.onclick = () => engine.startOverview();
+nextBtn.onclick     = () => engine.nextPoint();
+explainBtn.onclick  = () => engine.explain();
+stopBtn.onclick     = () => engine.stopSpeaking();
+```
+
+| Button | What happens |
+| --- | --- |
+| **Overview** | Speaks graph type and both axes, then starts guidance at the start of the curve. Guidance runs *while* the speech plays, so the user can be finding the curve as they listen. |
+| **Next point** | Targets the next maximum, minimum or turning point. Says "Follow the vibration to the next point." On arrival — when the finger actually gets there — it says "Explain available." |
+| **Explain** | Short readout of **where the finger actually is**, not where it was being sent: coordinates, plus whether it is a max, min, turning point, or the start/end of the curve. Ends with "Go to next point." |
+| **Stop speaking** | Silences speech only. Guidance keeps running, so cutting off a long explanation does not strand the user's finger. |
+
+`engine.guide()` returns a `GuidanceReading` (`state`, `index`, `curveY`,
+`delta`, `push`) if you want to draw the finger position or a hint arrow, and a
+`guidance:change` event fires on every state change. See
+[`contracts/haptic-patterns.md`](../contracts/haptic-patterns.md) for the
+pattern meanings in guidance mode.
+
+**Coordinates are normalised data space**, y increasing upward — the opposite of
+`clientY`. Use `fromPointerEvent`, or every direction cue comes out inverted.
+
 ## API
 
 | Call | Purpose |
@@ -99,7 +135,9 @@ since `/reason` has to be re-run anyway.
 | `sonify.play(opts) / series(n) / pause() / resume() / replay() / stop()` | Graph shape as sound. |
 | `playPattern(name)` | Fire one haptic pattern — for simulator test buttons. |
 | `pause() / resume() / replay()` | Both speech and sonification together. |
-| `stopAll()` | Full stop. Call this from the reset path. |
+| `startOverview() / nextPoint() / explain() / stopSpeaking()` | The four Explore buttons. |
+| `guide(x, y)` | Feed a pointer position in normalised data space. |
+| `stopAll()` | Full stop, including guidance. Call this from the reset path. |
 | `setRate(0.5–2.0)` | Speech rate. |
 | `getStatus()` | `audioUnlocked`, `speaking`, `sonifying`, `activeTransports`, … |
 

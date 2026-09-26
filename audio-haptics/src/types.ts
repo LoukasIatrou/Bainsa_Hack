@@ -142,6 +142,10 @@ export interface EngineStatus {
   extractionStatus: ExtractionStatus | null;
   /** True once Person 2's /reason result has been supplied via setReasoning(). */
   hasReasoning: boolean;
+  /** True while the Explore page's haptic curve-following is running. */
+  guiding: boolean;
+  /** The point of interest the user is currently being steered toward. */
+  targetIndex: number | null;
 }
 
 export type EngineEvent =
@@ -168,6 +172,16 @@ export type EngineEvent =
       index: number;
       label: string;
       value: number | null;
+    }
+  | {
+      type: 'guidance:change';
+      /** Where the finger is relative to the curve. */
+      state: 'idle' | 'off-curve' | 'on-curve' | 'off-chart';
+      index: number;
+      /** Which way the user should move to reach the curve. */
+      push: 'up' | 'down' | 'none';
+      /** curveY - fingerY in normalised units; positive means the curve is above. */
+      delta: number | null;
     }
   | { type: 'status:change'; status: EngineStatus };
 

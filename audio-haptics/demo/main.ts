@@ -250,3 +250,143 @@ window.addEventListener('keydown', (event) => {
 
 // Exposed for console assertions during verification.
 Object.assign(window, { engine, describeSonification, HAPTIC_PATTERNS });
+
+// ---------------------------------------------------------------------------
+// Explore page: haptic curve-following
+// ---------------------------------------------------------------------------
+
+const chart = document.getElementById('chart') as unknown as SVGSVGElement;
+const curveLine = document.getElementById('curveLine') as unknown as SVGPolylineElement;
+const fingerDot = document.getElementById('fingerDot') as unknown as SVGCircleElement;
+const targetDot = document.getElementById('targetDot') as unknown as SVGCircleElement;
+const pushLine = document.getElementById('pushLine') as unknown as SVGLineElement;
+const guidanceReadout = $('guidanceReadout');
+
+const VIEW = { w: 400, h: 260, pad: 16 };
+
+/** Normalised data space (y up) -> SVG coords (y down). */
+const toSvg = (nx: number, ny: number) => ({
+  x: VIEW.pad + nx * (VIEW.w - VIEW.pad * 2),
+  y: VIEW.h - VIEW.pad - ny * (VIEW.h - VIEW.pad * 2),
+});
+
+function drawCurve(): void {
+  const graph = engine.getGraph();
+  if (!graph) {
+    curveLine.setAttribute('points', '');
+    return;
+  }
+  const series = graph.series[engine.explore.currentSeries];
+  if (!series) return;
+  const values = series.values.filter((v): v is number => v !== null);
+  if (values.length === 0) return;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+
+  const pts: string[] = [];
+  series.values.forEach((v, i) => {
+    if (v === null) return; // a gap stays a gap
+    const nx = series.values.length > 1 ? i / (series.values.length - 1) : 0.5;
+    const p = toSvg(nx, (v - min) / span);
+    pts.push(`${p.x.toFixed(1)},${p.y.toFixed(1)}`);
+  });
+  curveLine.setAttribute('points', pts.join(' '));
+  drawTarget();
+}
+
+function drawTarget(): void {
+  const graph = engine.getGraph();
+  const target = engine.guidance.getTarget();
+  if (!graph || target === null) {
+    targetDot.setAttribute('cx', '-20');
+    return;
+  }
+  const series = graph.series[engine.explore.currentSeries];
+  const value = series?.values[target];
+  if (value === null || value === undefined) return;
+  const values = series!.values.filter((v): v is number => v !== null);
+  const min = Math.min(...values);
+  const span = (Math.max(...values) - min) || 1;
+  const nx = series!.values.length > 1 ? target / (series!.values.length - 1) : 0.5;
+  const p = toSvg(nx, (value - min) / span);
+  targetDot.setAttribute('cx', p.x.toFixed(1));
+  targetDot.setAttribute('cy', p.y.toFixed(1));
+}
+
+/** Pointer -> normalised data space, accounting for the SVG's inner padding. */
+function chartCoords(event: { clientX: number; clientY: number }): { x: number; y: number } {
+  const rect = chart.getBoundingClientRect();
+  const padX = (VIEW.pad / VIEW.w) * rect.width;
+  const padY = (VIEW.pad / VIEW.h) * rect.height;
+  const innerW = rect.width - padX * 2;
+  const innerH = rect.height - padY * 2;
+  return {
+    x: innerW <= 0 ? 0 : (event.clientX - rect.left - padX) / innerW,
+    y: innerH <= 0 ? 0 : 1 - (event.clientY - rect.top - padY) / innerH,
+  };
+}
+
+let tracking = false;
+
+function handlePointer(event: PointerEvent): void {
+  const { x, y } = chartCoords(event);
+  const reading = engine.guide(x, y);
+
+  const p = toSvg(Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y)));
+  fingerDot.setAttribute('cx', p.x.toFixed(1));
+  fingerDot.setAttribute('cy', p.y.toFixed(1));
+
+  if (reading.push !== 'none' && reading.curveY !== null) {
+    const to = toSvg(Math.min(1, Math.max(0, x)), reading.curveY);
+    pushLine.setAttribute('x1', p.x.toFixed(1));
+    pushLine.setAttribute('y1', p.y.toFixed(1));
+    pushLine.setAttribute('x2', to.x.toFixed(1));
+    pushLine.setAttribute('y2', to.y.toFixed(1));
+  } else {
+    pushLine.setAttribute('x2', pushLine.getAttribute('x1') ?? '-20');
+    pushLine.setAttribute('y2', pushLine.getAttribute('y1') ?? '-20');
+  }
+
+  guidanceReadout.className = `note ${reading.state}`;
+  guidanceReadout.textContent = reading.state === 'on-curve'
+    ? `ON CURVE at point ${reading.index + 1}`
+    : reading.state === 'off-chart'
+      ? 'Off the chart.'
+      : reading.push === 'none'
+        ? `Point ${reading.index + 1}: no readable value here.`
+        : `Move ${reading.push.toUpperCase()} — ${Math.abs((reading.delta ?? 0) * 100).toFixed(0)}% away`;
+}
+
+chart.addEventListener('pointerdown', (e) => {
+  tracking = true;
+  chart.setPointerCapture(e.pointerId);
+  handlePointer(e);
+});
+chart.addEventListener('pointermove', (e) => {
+  if (tracking) handlePointer(e);
+});
+chart.addEventListener('pointerup', (e) => {
+  tracking = false;
+  chart.releasePointerCapture(e.pointerId);
+});
+
+$('btnOverview').addEventListener('click', async () => {
+  await engine.unlock();
+  engine.startOverview();
+  drawTarget();
+});
+$('btnNext').addEventListener('click', () => { engine.nextPoint(); drawTarget(); });
+$('btnExplain').addEventListener('click', () => engine.explain());
+$('btnStop').addEventListener('click', () => engine.stopSpeaking());
+
+engine.on((event) => {
+  if (event.type === 'status:change') drawTarget();
+});
+
+// Redraw whenever a graph is loaded.
+const originalHandle = engine.handleExtraction.bind(engine);
+engine.handleExtraction = (response) => {
+  originalHandle(response);
+  drawCurve();
+};

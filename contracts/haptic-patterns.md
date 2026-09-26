@@ -28,6 +28,39 @@ grows each pulse, `down` shrinks it, `none` keeps them equal. On the phone the
 ramp is carried by the pulse durations themselves, which is the only intensity
 control `navigator.vibrate` offers.
 
+## Two modes, one vocabulary
+
+The same five patterns serve both interaction modes, so the user only ever
+learns one vocabulary.
+
+### Guidance mode (Explore page, finger on the chart)
+
+The user drags a finger over the graph and is steered onto the curve, then
+along it.
+
+| Situation | Pattern |
+| --------- | ------- |
+| Curve is above the finger — move up | `rising` |
+| Curve is below the finger — move down | `falling` |
+| Finger is on the curve (arrival) | `double` |
+| Following the curve, crossing into a new x position | `short` |
+| Finger has left the chart area | `long` |
+
+The direction pulse **repeats, and speeds up as the finger closes in** — about
+every 700 ms when far away, down to about 140 ms when nearly there. Proximity is
+the feedback; the pattern itself does not change.
+
+Coordinates are normalised **data** space: `y` = 0 at the graph minimum and 1 at
+the maximum, so y increases *upward*. A DOM `clientY` grows downward, so it must
+be flipped first — `fromPointerEvent()` does this. Getting it wrong inverts every
+direction cue, which is the one bug in this area that will not be obvious from
+reading the code.
+
+Within 6% of the value range counts as "on the curve". Over a stretch where the
+value could not be read, no direction is given at all rather than a guessed one.
+
+### Exploration mode (arrow keys / buttons)
+
 ## When each one fires during exploration
 
 Per move, the engine picks exactly one pattern, in this order:

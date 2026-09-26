@@ -97,11 +97,16 @@ export class Explorer {
     this.announce();
   }
 
-  focus(index: number): void {
+  /** `announce: false` moves the cursor without speaking or pulsing. */
+  focus(index: number, options: { announce?: boolean } = {}): void {
     const graph = this.deps.getGraph();
     if (!graph) return;
     const clamped = Math.min(Math.max(0, index), Math.max(0, pointCount(graph) - 1));
     this.pointIndex = clamped;
+    if (options.announce === false) {
+      this.emitFocus(graph);
+      return;
+    }
     this.announce();
   }
 

@@ -48,7 +48,12 @@ import {
   patternDuration,
 } from './haptics.js';
 import { Explorer } from './explorer.js';
+import { Guidance } from './guidance.js';
+import type { GuidanceReading } from './guidance.js';
+import { isLocalExtremum, maxIndex, minIndex, pointCount } from './graph-utils.js';
 import {
+  describeAxes,
+  describePointOfInterest,
   describeExtractionStatus,
   describeFieldsNeedingConfirmation,
   describeGraphIntro,
@@ -68,6 +73,7 @@ export class AudioHapticEngine {
   readonly sonifier: Sonifier;
   readonly haptics: Haptics;
   readonly explore: Explorer;
+  readonly guidance: Guidance;
 
   private listeners = new Set<EngineListener>();
   private graph: GraphData | null = null;
@@ -99,6 +105,159 @@ export class AudioHapticEngine {
       getFieldConfidence: () => this.fieldConfidence,
       getReasoning: () => this.reasoning,
     });
+
+    this.guidance = new Guidance({
+      haptics: this.haptics,
+      sonifier: this.sonifier,
+      emit,
+      getGraph: () => this.graph,
+      getReasoning: () => this.reasoning,
+      getSeriesIndex: () => this.explore.currentSeries,
+      onArrive: (index) => this.onGuidanceArrive(index),
+    });
+  }
+
+  // -- Explore page: the four buttons -----------------------------------------
+
+  /**
+   * Overview button. Speaks the graph type and both axes, then starts haptic
+   * guidance from the start of the curve. Guidance runs while the speech plays
+   * -- the user can already be finding the curve with their finger while they
+   * listen.
+   */
+  startOverview(): void {
+    if (!this.graph) {
+      this.speech.speak('No graph is loaded yet.', 'interrupt');
+      return;
+    }
+    this.speech.speak(describeAxes(this.graph, this.fieldConfidence), 'interrupt');
+    if (this.reasoning) {
+      this.speech.speak(this.reasoning.overview.text, 'normal');
+    } else if (this.graph.summary) {
+      this.speech.speak(this.graph.summary, 'normal');
+    }
+    // Silent: guidance announces the first point on arrival, so speaking it
+    // here as well would say it twice.
+    this.explore.focus(0, { announce: false });
+    this.guidance.start(0);
+    this.broadcastStatus();
+  }
+
+  /**
+   * Next point button. Steers the user toward the next point of interest --
+   * a maximum, minimum or turning point, falling back to the next x position
+   * when there is no further point of interest. Arrival is announced by
+   * `onGuidanceArrive`, not here: the user has to actually get there first.
+   */
+  nextPoint(): void {
+    if (!this.graph) {
+      this.speech.speak('No graph is loaded yet.', 'interrupt');
+      return;
+    }
+    const from = this.guidance.getCurrentIndex()
+      ?? this.guidance.getTarget()
+      ?? this.explore.currentPoint;
+    const next = this.nextInterestingIndex(from);
+    if (next === null) {
+      this.speech.speak('That is the last point of the curve.', 'interrupt');
+      this.haptics.play('long');
+      return;
+    }
+    this.guidance.start(next);
+    this.speech.speak('Follow the vibration to the next point.', 'interrupt');
+    this.broadcastStatus();
+  }
+
+  /**
+   * Explain button. Short readout of the point the user is on: where it is,
+   * what it is worth, and why it matters. Then hands back to Next point.
+   */
+  explain(): void {
+    if (!this.graph) {
+      this.speech.speak('No graph is loaded yet.', 'interrupt');
+      return;
+    }
+    // Where the finger actually is, not where it was being sent -- the user
+    // may have stopped short of the target or slid past it.
+    const index = this.guidance.getCurrentIndex()
+      ?? this.guidance.getTarget()
+      ?? this.explore.currentPoint;
+    this.speech.speak(
+      describePointOfInterest(
+        this.graph,
+        this.explore.currentSeries,
+        index,
+        this.interestAt(index),
+        this.fieldConfidence,
+      ),
+      'interrupt',
+    );
+    this.speech.speak('Go to next point.', 'normal');
+  }
+
+  /**
+   * Stop speaking button. Speech only -- haptic guidance keeps running, so
+   * silencing a long explanation does not also strand the user's finger.
+   */
+  stopSpeaking(): void {
+    this.speech.stop();
+    this.broadcastStatus();
+  }
+
+  /**
+   * Feed a pointer position from the chart area. Person 4 calls this on every
+   * pointermove; it throttles internally. Coordinates are normalised data
+   * space -- use `fromPointerEvent(event, chartEl)` to convert, which also
+   * flips screen-y into data-y.
+   */
+  guide(x: number, y: number): GuidanceReading {
+    return this.guidance.update(x, y);
+  }
+
+  /** Fired when the finger actually lands on the point it was steered toward. */
+  private onGuidanceArrive(index: number): void {
+    this.explore.focus(index, { announce: false });
+    this.speech.speak('Explain available.', 'interrupt');
+    this.broadcastStatus();
+  }
+
+  /** Person 2's flags where available, otherwise computed locally. */
+  private interestAt(index: number): {
+    isMax?: boolean;
+    isMin?: boolean;
+    isTurningPoint?: boolean;
+  } {
+    const graph = this.graph;
+    if (!graph) return {};
+    const series = graph.series[this.explore.currentSeries];
+    if (!series) return {};
+
+    const entry = this.reasoning?.series.find((s) => s.name === series.name);
+    const point = entry?.points.find((p) => p.index === index);
+    if (point) {
+      return {
+        isMax: point.isMax,
+        isMin: point.isMin,
+        isTurningPoint: point.isTurningPoint,
+      };
+    }
+    return {
+      isMax: maxIndex(series) === index,
+      isMin: minIndex(series) === index,
+      isTurningPoint: isLocalExtremum(series, index),
+    };
+  }
+
+  /** Next maximum, minimum or turning point after `from`, else the next x position. */
+  private nextInterestingIndex(from: number): number | null {
+    const graph = this.graph;
+    if (!graph) return null;
+    const total = pointCount(graph);
+    for (let i = from + 1; i < total; i++) {
+      const interest = this.interestAt(i);
+      if (interest.isMax || interest.isMin || interest.isTurningPoint) return i;
+    }
+    return from + 1 < total ? from + 1 : null;
   }
 
   // -- events ---------------------------------------------------------------
@@ -388,6 +547,7 @@ export class AudioHapticEngine {
   stopAll(): void {
     this.speech.stop();
     this.sonifier.stop();
+    this.guidance.stop();
     this.haptics.stop();
     this.broadcastStatus();
   }
@@ -403,6 +563,8 @@ export class AudioHapticEngine {
       hasGraph: this.graph !== null,
       extractionStatus: this.extractionStatus,
       hasReasoning: this.reasoning !== null,
+      guiding: this.guidance.isActive,
+      targetIndex: this.guidance.getTarget(),
     };
   }
 }
@@ -411,12 +573,16 @@ export { HAPTIC_PATTERNS, Haptics, patternDuration } from './haptics.js';
 export { SpeechQueue, chunkText } from './speech.js';
 export { Sonifier } from './sonification.js';
 export { Explorer } from './explorer.js';
+export { Guidance, fromPointerEvent } from './guidance.js';
+export type { GuidanceReading, GuidanceState } from './guidance.js';
 export {
   LOW_CONFIDENCE,
   describeExtractionStatus,
   describeFieldsNeedingConfirmation,
   describeGraphIntro,
   describePoint,
+  describeAxes,
+  describePointOfInterest,
   describeSonification,
   speakNumber,
   speakUnit,

@@ -285,3 +285,58 @@ export function describeFieldsNeedingConfirmation(
   const list = low.length === 1 ? last : `${low.slice(0, -1).join(', ')} and ${last}`;
   return `Please check the ${list}.`;
 }
+
+/**
+ * The short "Explain" readout for the Explore page: where the point is, what
+ * it is worth, and why it is interesting. Deliberately much shorter than
+ * `describeGraphIntro` -- it is spoken every time the user lands on a point,
+ * so it has to stay out of the way.
+ */
+export function describePointOfInterest(
+  graph: GraphData,
+  seriesIndex: number,
+  pointIndex: number,
+  interest: { isMax?: boolean; isMin?: boolean; isTurningPoint?: boolean } = {},
+  fieldConfidence?: FieldConfidence | null,
+): string {
+  const series = graph.series[seriesIndex];
+  if (!series) return 'No such series.';
+
+  const parts: string[] = [`${xLabel(graph, pointIndex)},`];
+  const raw = series.values[pointIndex];
+  parts.push(speakValue(raw === undefined ? null : raw, graph, fieldConfidence));
+
+  const notes: string[] = [];
+  if (interest.isMax) notes.push('the highest point');
+  else if (interest.isMin) notes.push('the lowest point');
+  else if (interest.isTurningPoint) notes.push('a turning point');
+
+  if (pointIndex === 0) notes.push('the start of the curve');
+  else if (pointIndex === pointCount(graph) - 1) notes.push('the end of the curve');
+
+  const head = parts.join(' ');
+  return notes.length > 0 ? `${head}. This is ${notes.join(', and ')}.` : `${head}.`;
+}
+
+/**
+ * Axes and graph type only -- what the Overview button says before handing
+ * over to haptic guidance. Shorter than `describeGraphIntro`, which also
+ * covers series, range and unreadable counts.
+ */
+export function describeAxes(
+  graph: GraphData,
+  fieldConfidence?: FieldConfidence | null,
+): string {
+  const unit = speakUnit(graph.yAxis.unit);
+  const titleCaveat = fieldConfidence && fieldConfidence.title < LOW_CONFIDENCE
+    ? ', though the title may be misread'
+    : '';
+  const vertical = unit
+    ? `Vertical axis, ${graph.yAxis.label}, in ${unit}.`
+    : `Vertical axis, ${graph.yAxis.label}. The unit could not be read.`;
+  return [
+    `${graph.graphType} graph, titled ${graph.title}${titleCaveat}.`,
+    `Horizontal axis, ${graph.xAxis.label}, from ${xLabel(graph, 0)} to ${xLabel(graph, pointCount(graph) - 1)}.`,
+    vertical,
+  ].join(' ');
+}
