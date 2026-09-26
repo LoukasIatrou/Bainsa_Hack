@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Person 3 - audio &amp; haptics harness</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #101215;
+        --panel: #191d22;
+        --line: #2c333b;
+        --fg: #eef2f6;
+        --muted: #a3afbb;
+        --accent: #6fd3ff;
+        --warn: #ffc860;
+        --bad: #ff8d7a;
+        --ok: #7fe3a1;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--bg);
+        color: var(--fg);
+        font: 16px/1.5 system-ui, -apple-system, sans-serif;
+      }
+      h1 { font-size: 1.15rem; margin: 0 0 4px; }
+      h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em;
+           color: var(--muted); margin: 0 0 8px; }
+      p.note { color: var(--muted); font-size: 0.85rem; margin: 0 0 16px; }
+      section {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 14px;
+        margin-bottom: 12px;
+      }
+      .row { display: flex; flex-wrap: wrap; gap: 8px; }
+      button {
+        font: inherit;
+        min-height: 44px;
+        padding: 10px 14px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: #232a31;
+        color: var(--fg);
+        cursor: pointer;
+      }
+      button:hover { border-color: var(--accent); }
+      button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+      button[aria-pressed='true'] { background: #2f4756; border-color: var(--accent); }
+      button.primary { background: #17455c; border-color: var(--accent); }
+      label { display: inline-flex; align-items: center; gap: 8px; color: var(--muted);
+              font-size: 0.9rem; min-height: 44px; }
+      input[type='range'] { width: 160px; }
+      dl.status { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0;
+                  font-size: 0.9rem; }
+      dl.status dt { color: var(--muted); }
+      dl.status dd { margin: 0; font-variant-numeric: tabular-nums; }
+      .pill { display: inline-block; padding: 1px 8px; border-radius: 999px;
+              font-size: 0.78rem; border: 1px solid var(--line); }
+      .pill.on { color: var(--ok); border-color: var(--ok); }
+      .pill.off { color: var(--muted); }
+      #simulator {
+        display: flex; align-items: center; gap: 10px; min-height: 56px;
+      }
+      #ring {
+        width: 44px; height: 44px; border-radius: 50%;
+        border: 3px solid var(--line); background: #1d2329;
+        transition: transform 60ms linear, background 60ms linear, border-color 60ms linear;
+      }
+      #ring.pulse { background: var(--accent); border-color: var(--accent); }
+      #patternLabel { color: var(--muted); font-size: 0.9rem; }
+      #transcript {
+        margin: 0; padding: 0; list-style: none; max-height: 190px; overflow-y: auto;
+        font-size: 0.9rem;
+      }
+      #transcript li { padding: 5px 0; border-bottom: 1px solid var(--line); }
+      #transcript li:last-child { border-bottom: 0; }
+      #transcript .meta { color: var(--muted); font-size: 0.78rem; }
+      #focusReadout { font-size: 1.05rem; font-weight: 600; }
+      .warn { color: var(--warn); }
+      .bad { color: var(--bad); }
+      kbd {
+        font: inherit; font-size: 0.8rem; padding: 1px 6px; border-radius: 4px;
+        border: 1px solid var(--line); background: #232a31; color: var(--muted);
+      }
+      #explorePage { display: flex; gap: 14px; flex-wrap: wrap; }
+      #chartWrap { flex: 1 1 280px; min-width: 260px; }
+      #chart {
+        width: 100%; height: 220px; background: #12171c;
+        border: 1px solid var(--line); border-radius: 8px; touch-action: none; cursor: crosshair;
+      }
+      #exploreButtons { flex: 0 0 auto; flex-direction: column; align-items: stretch; }
+      #exploreButtons button { min-width: 150px; }
+      #guidanceReadout.on-curve { color: var(--ok); }
+      #guidanceReadout.off-curve { color: var(--warn); }
+      #guidanceReadout.off-chart { color: var(--bad); }
+      #gesturePad {
+        touch-action: none; user-select: none; -webkit-user-select: none;
+        min-height: 220px; border: 2px dashed var(--line); border-radius: 12px;
+        background: #12171c; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 6px; text-align: center;
+        padding: 16px;
+      }
+      #gesturePad.graph { border-color: var(--accent); background: #10202a; }
+      #gestureMode { margin: 0; font-size: 0.78rem; letter-spacing: 0.12em;
+                     color: var(--muted); }
+      #gesturePad.graph #gestureMode { color: var(--accent); }
+      #gestureItem { margin: 0; font-size: 1.3rem; font-weight: 600; }
+      #gestureHint { margin: 0; font-size: 0.8rem; color: var(--muted); }
+      .sr-only {
+        position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+        overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Person 3 — audio &amp; haptics harness</h1>
+    <p class="note">
+      Test rig for the engine, not the product UI (that is Person 4's). Open this on the
+      Android phone over wifi to test <code>navigator.vibrate</code> — it is a silent no-op on
+      a laptop.
+    </p>
+
+    <section aria-labelledby="h-audio">
+      <h2 id="h-audio">1. Enable audio</h2>
+      <div class="row">
+        <button id="unlock" class="primary">Enable audio &amp; haptics</button>
+        <button id="testPattern">Test vibration</button>
+        <button id="diagnose">Run diagnostic</button>
+        <button id="speakTest">Speak test</button>
+      </div>
+      <pre id="diagnostic" style="display:none; margin:10px 0 0; padding:10px;
+           background:#12171c; border:1px solid var(--line); border-radius:8px;
+           font-size:0.82rem; white-space:pre-wrap; overflow-x:auto;"></pre>
+      <div class="row" id="phoneVibeRow" style="margin-top:10px;"></div>
+      <p class="note" id="phoneVibeNote" style="margin:6px 0 0;">
+        Tap a pattern to feel it. Only works on Android; a laptop reports success and does nothing.
+      </p>
+      <p class="note" id="unlockNote" style="margin: 10px 0 0;">
+        Browsers block audio until a button is pressed. Nothing is audible before this.
+      </p>
+    </section>
+
+    <section aria-labelledby="h-load">
+      <h2 id="h-load">2. Load a graph from Person 1's backend</h2>
+      <div class="row">
+        <button data-scenario="ok">ok (2 series)</button>
+        <button data-scenario="low_confidence">low_confidence (null value)</button>
+        <button data-scenario="error">error (no graph)</button>
+      </div>
+      <label style="margin-top: 8px; display: flex;">
+        Backend
+        <input id="backend" type="url" style="flex: 1; min-width: 200px; min-height: 40px;
+               background: #232a31; color: var(--fg); border: 1px solid var(--line);
+               border-radius: 6px; padding: 6px 10px;" />
+      </label>
+      <p class="note" id="loadNote" style="margin: 8px 0 0;">No graph loaded.</p>
+    </section>
+
+    <section aria-labelledby="h-gestures">
+      <h2 id="h-gestures">Gestures (test on the phone)</h2>
+      <div id="gesturePad" role="application"
+           aria-label="Gesture test area. Swipe to move through the menu, tap to activate, two-finger tap to switch modes.">
+        <p id="gestureMode">MENU MODE</p>
+        <p id="gestureItem">—</p>
+        <p id="gestureHint">Swipe left / right &middot; tap to choose &middot; two-finger tap to switch mode</p>
+      </div>
+      <p class="note" id="gestureLog" style="margin:8px 0 0;">No gesture yet.</p>
+      <div class="row" style="margin-top:8px;">
+        <label><input id="vibeToggle" type="checkbox" /> Use phone vibration (off by default)</label>
+      </div>
+    </section>
+
+    <section aria-labelledby="h-explore-page">
+      <h2 id="h-explore-page">Explore page (touch the curve)</h2>
+      <div id="explorePage">
+        <div id="chartWrap">
+          <svg id="chart" viewBox="0 0 400 260" preserveAspectRatio="none"
+               role="img" aria-label="Graph. Drag a finger to follow the curve by touch.">
+            <polyline id="curveLine" fill="none" stroke="var(--accent)" stroke-width="2.5" points="" />
+            <circle id="targetDot" r="7" fill="none" stroke="var(--warn)" stroke-width="2.5" cx="-20" cy="-20" />
+            <circle id="fingerDot" r="6" fill="var(--fg)" cx="-20" cy="-20" />
+            <line id="pushLine" stroke="var(--warn)" stroke-width="2" x1="-20" y1="-20" x2="-20" y2="-20" />
+          </svg>
+          <p class="note" id="guidanceReadout" style="margin:6px 0 0;">Guidance idle.</p>
+        </div>
+        <div id="exploreButtons" class="row">
+          <button id="btnOverview" class="primary">Overview</button>
+          <button id="btnNext">Next point</button>
+          <button id="btnExplain">Explain</button>
+          <button id="btnStop">Stop speaking</button>
+        </div>
+      </div>
+    </section>
+
+    <section aria-labelledby="h-explore">
+      <h2 id="h-explore">3. Explore</h2>
+      <p id="focusReadout">—</p>
+      <div class="row">
+        <button id="prev">← Previous</button>
+        <button id="next">Next →</button>
+        <button id="max">Highest</button>
+        <button id="min">Lowest</button>
+        <button id="series">Switch series</button>
+        <button id="where">Where am I</button>
+      </div>
+      <p class="note" style="margin: 10px 0 0;">
+        Keys: <kbd>←</kbd> <kbd>→</kbd> move · <kbd>Home</kbd> <kbd>End</kbd> ends ·
+        <kbd>M</kbd> highest · <kbd>N</kbd> lowest · <kbd>S</kbd> series ·
+        <kbd>Space</kbd> sonify · <kbd>P</kbd> pause · <kbd>R</kbd> replay
+      </p>
+    </section>
+
+    <section aria-labelledby="h-sonify">
+      <h2 id="h-sonify">4. Sonification</h2>
+      <div class="row">
+        <button id="sonifyContinuous">Play shape (continuous)</button>
+        <button id="sonifyDiscrete">Play points (discrete)</button>
+        <button id="sonifySeries0">Series 1 only</button>
+        <button id="sonifySeries1">Series 2 only</button>
+        <button id="describe">Describe in words</button>
+      </div>
+      <div class="row" style="margin-top: 8px;">
+        <button id="pause">Pause</button>
+        <button id="resume">Resume</button>
+        <button id="replay">Replay</button>
+        <button id="stop">Stop all</button>
+      </div>
+      <div class="row" style="margin-top: 8px;">
+        <label>
+          Speech rate <span id="rateValue">1.0</span>×
+          <input id="rate" type="range" min="0.5" max="2" step="0.1" value="1" />
+        </label>
+        <label>
+          <input id="quantise" type="checkbox" checked /> Pentatonic
+        </label>
+        <label>
+          <input id="tactile" type="checkbox" checked /> Audio-tactile buzz
+        </label>
+      </div>
+    </section>
+
+    <section aria-labelledby="h-haptics">
+      <h2 id="h-haptics">5. Haptic patterns</h2>
+      <div id="simulator">
+        <div id="ring" aria-hidden="true"></div>
+        <span id="patternLabel">No pattern played yet.</span>
+      </div>
+      <div class="row" id="patternButtons" style="margin-top: 8px;"></div>
+    </section>
+
+    <section aria-labelledby="h-status">
+      <h2 id="h-status">Status</h2>
+      <dl class="status">
+        <dt>Audio unlocked</dt><dd id="s-unlocked">no</dd>
+        <dt>Speaking</dt><dd id="s-speaking">no</dd>
+        <dt>Sonifying</dt><dd id="s-sonifying">no</dd>
+        <dt>Extraction</dt><dd id="s-extraction">—</dd>
+        <dt>Haptic channels</dt><dd id="s-transports">—</dd>
+      </dl>
+    </section>
+
+    <section aria-labelledby="h-transcript">
+      <h2 id="h-transcript">Spoken transcript</h2>
+      <ul id="transcript"></ul>
+      <p class="sr-only" id="live" role="status" aria-live="polite"></p>
+    </section>
+
+    <script type="module" src="/demo/main.ts"></script>
+  </body>
+</html>

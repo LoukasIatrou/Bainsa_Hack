@@ -15,3 +15,6 @@ dist/
 # Scratch / local dev
 .scratch-images/
 *.log
+
+# Claude Code session settings
+.claude/
