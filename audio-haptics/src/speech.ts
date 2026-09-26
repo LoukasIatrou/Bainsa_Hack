@@ -80,6 +80,48 @@ export function chunkText(text: string, maxLen = MAX_CHUNK_CHARS): string[] {
   return chunks;
 }
 
+/**
+ * Rank a voice by likely listening quality.
+ *
+ * Voice lists differ wildly by platform. Android Chrome offers a handful of
+ * genuinely good neural voices; desktop Linux offers ~945 espeak-ng variants of
+ * the same robotic synth, including "English (Caribbean)+Demonic". Picking the
+ * first match, or even the one flagged `default`, lands somewhere arbitrary in
+ * that list, so rank explicitly instead.
+ *
+ * Higher is better.
+ */
+export function voiceQuality(voice: SpeechSynthesisVoice): number {
+  const name = voice.name.toLowerCase();
+  const lang = voice.lang.toLowerCase();
+  let score = 0;
+
+  // Named engines, best first. Google's Android voices are the ones the demo
+  // will actually be heard through.
+  if (name.includes('google')) score += 100;
+  else if (name.includes('microsoft') || name.includes('natural')) score += 80;
+  else if (name.includes('samsung')) score += 60;
+  else if (name.includes('mbrola')) score += 40;   // diphone, clearly better than raw espeak
+  else if (name.includes('espeak')) score += 0;
+
+  // Network voices are usually the higher-quality ones where both exist.
+  if (!voice.localService) score += 15;
+
+  // espeak variants ("English+Adam", "+Demonic") are novelty timbres layered on
+  // the same synth; the plain entry is the intelligible one.
+  if (name.includes('+')) score -= 50;
+
+  // Prefer mainstream accents over regional espeak variants (en-029 Caribbean,
+  // en-gb-scotland and friends) unless nothing else exists.
+  if (lang === 'en-us') score += 30;
+  else if (lang === 'en-gb') score += 25;
+  else if (lang === 'en') score += 20;
+  else if (lang.startsWith('en')) score += 5;
+
+  if (voice.default) score += 10;
+  return score;
+}
+
 export class SpeechQueue {
   private readonly synth: SpeechSynthesis | null;
   private readonly emit: (event: EngineEvent) => void;
@@ -98,6 +140,7 @@ export class SpeechQueue {
    */
   private voices: SpeechSynthesisVoice[] = [];
   private rate = 1;
+  private pitch = 1;
   private paused = false;
   /** Set while we are tearing down an utterance on purpose, so onend is ignored. */
   private discarding = false;
@@ -149,6 +192,18 @@ export class SpeechQueue {
     return this.rate;
   }
 
+  get currentPitch(): number {
+    return this.pitch;
+  }
+
+  /**
+   * 0-2, default 1. Lowering it slightly takes some of the edge off espeak's
+   * harshness; it does nothing much to a good neural voice.
+   */
+  setPitch(pitch: number): void {
+    this.pitch = Math.min(2, Math.max(0, pitch));
+  }
+
   /** 0.5-2.0. Screen-reader users routinely want faster speech than the default. */
   setRate(rate: number): void {
     this.rate = Math.min(2, Math.max(0.5, rate));
@@ -164,23 +219,19 @@ export class SpeechQueue {
     this.voices = voices;
 
     const english = voices.filter((v) => v.lang.toLowerCase().startsWith('en'));
-    if (english.length === 0) {
-      this.voice = voices[0] ?? null;
-      return;
+    const pool = english.length > 0 ? english : voices;
+    if (pool.length === 0) return;
+
+    let best = pool[0]!;
+    let bestScore = -Infinity;
+    for (const v of pool) {
+      const score = voiceQuality(v);
+      if (score > bestScore) {
+        bestScore = score;
+        best = v;
+      }
     }
-
-    // espeak-ng names its variants "English+Adam", "English+Alex" and so on.
-    // Those are novelty timbres; the plain entry is the intelligible one, and
-    // picking by first-match would otherwise land on an arbitrary variant.
-    const plain = english.filter((v) => !v.name.includes('+'));
-    const pool = plain.length > 0 ? plain : english;
-
-    this.voice = pool.find((v) => v.default)
-      ?? pool.find((v) => v.lang.toLowerCase() === 'en-us')
-      ?? pool.find((v) => v.lang.toLowerCase() === 'en-gb')
-      ?? pool.find((v) => v.localService)
-      ?? pool[0]
-      ?? null;
+    this.voice = best;
   }
 
   /** Which voice was chosen, for the diagnostic. */
@@ -344,6 +395,7 @@ export class SpeechQueue {
 
     const utterance = new SpeechSynthesisUtterance(chunk);
     utterance.rate = this.rate;
+    utterance.pitch = this.pitch;
     if (this.voice) utterance.voice = this.voice;
 
     utterance.onend = () => {

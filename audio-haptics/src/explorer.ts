@@ -104,8 +104,15 @@ export class Explorer {
     this.announce();
   }
 
-  /** `announce: false` moves the cursor without speaking or pulsing. */
-  focus(index: number, options: { announce?: boolean } = {}): void {
+  /**
+   * `announce: false` moves the cursor without speaking or pulsing.
+   * `pattern` overrides the data-driven choice -- used when the caller already
+   * knows the move means something else, such as arriving on the curve.
+   */
+  focus(
+    index: number,
+    options: { announce?: boolean; pattern?: HapticPatternName } = {},
+  ): void {
     const graph = this.deps.getGraph();
     if (!graph) return;
     const clamped = Math.min(Math.max(0, index), Math.max(0, pointCount(graph) - 1));
@@ -114,7 +121,7 @@ export class Explorer {
       this.emitFocus(graph);
       return;
     }
-    this.announce();
+    this.announce(options.pattern ? { pattern: options.pattern } : {});
   }
 
   /** Jumps to the highest *readable* value; nulls are never treated as zero. */

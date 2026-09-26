@@ -236,8 +236,8 @@ export class AudioHapticEngine {
    * Speech uses `interrupt`, which cancels before speaking exactly as 2
    * requires, so fast swiping never builds a backlog of stale utterances.
    */
-  exploreIndex(index: number): void {
-    this.explore.focus(index);
+  exploreIndex(index: number, options: { pattern?: HapticPatternName } = {}): void {
+    this.explore.focus(index, { pattern: options.pattern });
   }
 
   /** Whether readouts omit the "Point 3 of 5" suffix. */
@@ -703,6 +703,16 @@ export {
   toLegacyDirection,
 } from './ring.js';
 export type { RingState } from './ring.js';
+export {
+  createSpiderSenseBinding,
+  indexAtX,
+  patternForAngle,
+} from './spider-sense.js';
+export type {
+  SpiderSenseBindingOptions,
+  SpiderSensePoint,
+  SpiderSenseStateLike,
+} from './spider-sense.js';
 export type { GuidanceReading, GuidanceState } from './guidance.js';
 export {
   LOW_CONFIDENCE,

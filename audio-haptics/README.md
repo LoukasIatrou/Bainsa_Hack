@@ -80,6 +80,39 @@ demo still runs if `/reason` is down. `setGraph` and `handleExtraction` both
 clear stale reasoning — call `setReasoning` again after any user correction,
 since `/reason` has to be re-run anyway.
 
+## Spider-sense circle (Person 4's component)
+
+`frontend/src/spiderSense/logic.ts` is pure by design -- "so audio/haptics can
+drive the same state machine later without going through the visual component".
+This is that driver:
+
+```tsx
+import { createSpiderSenseBinding } from '@bainsa/audio-haptics';
+
+const onState = useMemo(
+  () => createSpiderSenseBinding(engine, { pointCount, box: { width, padding } }),
+  [engine, pointCount, width, padding],
+);
+
+<SpiderSense curve={curve} width={w} height={h} onStateChange={onState} />
+```
+
+Pass it straight to `onStateChange`; it throttles internally, so it is safe on
+every pointermove. What the user gets:
+
+| Their state | Result |
+| --- | --- |
+| `searching`, angle pointing up | `rising`, repeating faster as `distance` shrinks |
+| `searching`, angle pointing down | `falling`, same proximity ramp |
+| `searching`, angle near horizontal | `short` -- claiming "up" for a sideways target would mislead |
+| `on-curve`, first contact | `double`, overriding the trend so arrival always feels identical |
+| `on-curve`, crossing into a new index | the data-driven pattern, plus the spoken readout |
+| `pointer: null` | pulsing stops; their `lastContact` memory is untouched |
+
+`distance` drives the repeat rate (700ms far, 140ms near), which is what their
+comment intends by "drives the pulse". Screen x maps to a data index through the
+same `box` the curve was built into — `indexAtX` is exported if you need it.
+
 ## Phone integration (Person 4)
 
 Per `docs/phone-demo-navigation.md`: a native `<input type="range">` drives an
