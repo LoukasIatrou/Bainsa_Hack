@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react'
 import { RingSimulator } from './RingSimulator'
 import type { PullDirection } from './RingSimulator'
-import { engine } from './engine'
+import { engine, isLocalExtremum } from './engine'
 import type { HapticPatternName } from './engine'
-import { isLocalExtremum } from './engine/graphUtils'
 import type { GraphData } from './types'
 
 interface ExplorationProps {

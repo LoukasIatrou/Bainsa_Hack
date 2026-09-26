@@ -246,6 +246,15 @@ body {
   -webkit-user-select: none;
 }
 
+.explore__plot {
+  position: absolute;
+  pointer-events: none;
+}
+
+.explore__help-head {
+  margin: 0 0 6px;
+}
+
 .explore__panel svg {
   position: absolute;
   inset: 0;

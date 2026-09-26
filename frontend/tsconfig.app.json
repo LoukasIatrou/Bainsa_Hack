@@ -17,9 +17,11 @@
     "jsx": "react-jsx",
 
     /* Linting */
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "erasableSyntaxOnly": true,
+    /* Off only because Person 3's engine (../audio-haptics, compiled from source) uses
+       parameter properties and has unused locals; audio-haptics/ is not ours to edit. */
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "erasableSyntaxOnly": false,
     "noFallthroughCasesInSwitch": true
   },
   "include": ["src"]
