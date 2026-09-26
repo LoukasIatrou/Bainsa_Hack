@@ -79,6 +79,16 @@ export interface ExtractionResponse {
  */
 export type SpeechPriority = 'interrupt' | 'normal' | 'background';
 
+/**
+ * Whether the graph is a smooth function or a set of labelled data points.
+ *
+ * This decides which modes exist. A continuous curve has no individual points
+ * worth stopping on, so it gets Overview only: trace the shape, hear the
+ * summary. A discrete graph additionally gets Explain mode, which walks the
+ * finger from point to point.
+ */
+export type GraphKind = 'continuous' | 'discrete';
+
 export type HapticPatternName = 'short' | 'double' | 'long' | 'rising' | 'falling';
 
 /** How the simulator should render intensity across the pattern. */
@@ -146,6 +156,12 @@ export interface EngineStatus {
   speechVoices: number;
   /** False when speech cannot actually produce sound on this device. */
   speechUsable: boolean;
+  /** Continuous curves have no Explain mode; discrete ones do. */
+  graphKind: GraphKind;
+  /** True while the Explain walkthrough is stepping through points. */
+  explaining: boolean;
+  /** Which point Explain mode is currently on, 1-based for display. */
+  explainStep: number | null;
   /** True while the Explore page's haptic curve-following is running. */
   guiding: boolean;
   /** The point of interest the user is currently being steered toward. */
@@ -155,6 +171,8 @@ export interface EngineStatus {
 export type EngineEvent =
   | { type: 'speech:start'; text: string; priority: SpeechPriority }
   | { type: 'speech:end'; text: string }
+  /** The queue drained: nothing is speaking and nothing is pending. */
+  | { type: 'speech:idle' }
   /** Every spoken utterance, so Person 4 can mirror it into an ARIA live region. */
   | { type: 'speech:caption'; text: string; priority: SpeechPriority }
   | { type: 'sonify:start'; total: number }

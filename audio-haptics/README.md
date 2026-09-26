@@ -167,6 +167,33 @@ the flash can never disagree about which point they are showing.
 exposes `navigator.vibrate` and silently does nothing, with no way to detect
 the difference, and doc 4 forbids the ring implying hardware it cannot confirm.
 
+## Continuous vs discrete
+
+```ts
+engine.getGraphKind();        // 'continuous' | 'discrete', inferred on load
+engine.setGraphKind('continuous');   // override when you know better
+engine.supportsExplainMode;   // false for continuous
+```
+
+| Kind | Overview | Explain |
+| --- | --- | --- |
+| `continuous` | Steers onto the curve, then follows it freely — no target, no per-point stops. Speaks the whole-graph summary. | Refused, with a spoken reason. |
+| `discrete` | Steers to the first point. | Walks through every point in turn. |
+
+```ts
+engine.startExplainMode();      // discrete only
+engine.skipToNextExplanation(); // move on without waiting
+engine.stopExplainMode();
+```
+
+Explain mode per point: steer → `double` on arrival → speak → steer to the next
+**when the explanation finishes**, keyed off the speech queue draining rather
+than a timer. `status.explainStep` is the 1-based position for display.
+
+Inference is a heuristic (40+ points, or 25+ bare numeric labels, reads as
+continuous). Getting it wrong only changes which modes are offered, never what
+is spoken — override it when the curve came from sampling a function.
+
 ## Explore page: the four buttons
 
 The Explore page is driven by touch — the user drags a finger over the chart and

@@ -227,8 +227,12 @@ export class Guidance {
     }
 
     if (enteredCurve) {
-      // Distinct arrival cue, clearly different from the direction pulses.
-      this.fire('double', reading, now);
+      // `double` means "on the right point", not merely "on the curve". When a
+      // target is set and the finger lands somewhere else along the line, that
+      // gets a plain tick instead -- otherwise the confirmation pulse would lie
+      // about where the user is.
+      const atTarget = this.targetIndex === null || reading.index === this.targetIndex;
+      this.fire(atTarget ? 'double' : 'short', reading, now);
       this.sonifyIndex(reading.index);
       this.lastIndex = reading.index;
       this.currentIndex = reading.index;
@@ -238,9 +242,15 @@ export class Guidance {
     }
 
     if (reading.state === 'on-curve') {
-      // Tick once per new x position, so sliding along feels like detents.
+      // Tick once per new x position, so sliding along feels like detents --
+      // except when that position IS the target, which earns the confirmation
+      // `double`. Reaching the target by tracing along the curve is the normal
+      // case, not an edge case.
       if (reading.index !== this.lastIndex && now - this.lastTickAt >= TICK_INTERVAL_MS) {
-        this.fire('short', reading, now);
+        const hittingTarget = this.targetIndex !== null
+          && reading.index === this.targetIndex
+          && !this.announcedArrival;
+        this.fire(hittingTarget ? 'double' : 'short', reading, now);
         this.sonifyIndex(reading.index);
         this.lastTickAt = now;
         this.lastIndex = reading.index;

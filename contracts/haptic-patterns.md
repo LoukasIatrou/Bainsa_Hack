@@ -33,6 +33,28 @@ control `navigator.vibrate` offers.
 The same five patterns serve both interaction modes, so the user only ever
 learns one vocabulary.
 
+### Continuous vs discrete graphs
+
+Which modes exist depends on the kind of graph:
+
+| Kind | Modes | Why |
+| --- | --- | --- |
+| **continuous** (a sampled curve, `y = f(x)`) | Overview only | There are no individual points worth stopping at. Overview steers the finger onto the line and then simply follows it, with a spoken summary of the whole shape. |
+| **discrete** (labelled data points) | Overview **and** Explain | Each point carries a value worth hearing, so Explain walks the finger through them in turn. |
+
+Explain mode, per point: steer to the point, confirm arrival with `double`,
+speak the explanation, then steer to the next one **once the explanation has
+finished speaking** — the sequencer waits for the speech queue to drain rather
+than guessing at a duration.
+
+`double` therefore means **"you are on the right point"**, not merely "you are
+touching the curve". Landing anywhere else along the line gets `short`, however
+the finger got there. Confusing the two would have the confirmation pulse lie
+about where the user is.
+
+The kind is inferred on load (many points, or 25+ bare numeric labels, reads as
+continuous) and can be overridden with `engine.setGraphKind()`.
+
 ### Guidance mode (Explore page, finger on the chart)
 
 The user drags a finger over the graph and is steered onto the curve, then

@@ -34,6 +34,7 @@ import type {
   ExtractionStatus,
   FieldConfidence,
   GraphData,
+  GraphKind,
   HapticPatternName,
   SonifyOptions,
 } from './types.js';
@@ -49,8 +50,15 @@ import {
 } from './haptics.js';
 import { Explorer } from './explorer.js';
 import { Guidance } from './guidance.js';
+import { ExplainMode } from './explain-mode.js';
 import type { GuidanceReading } from './guidance.js';
-import { isLocalExtremum, maxIndex, minIndex, pointCount } from './graph-utils.js';
+import {
+  inferGraphKind,
+  isLocalExtremum,
+  maxIndex,
+  minIndex,
+  pointCount,
+} from './graph-utils.js';
 import {
   describeAxes,
   describePointOfInterest,
@@ -80,6 +88,7 @@ export class AudioHapticEngine {
   readonly haptics: Haptics;
   readonly explore: Explorer;
   readonly guidance: Guidance;
+  readonly explainMode: ExplainMode;
 
   private listeners = new Set<EngineListener>();
   private graph: GraphData | null = null;
@@ -88,6 +97,7 @@ export class AudioHapticEngine {
   private reasoning: ReasoningResponse | null = null;
   private lastSonifyOptions: SonifyOptions = {};
   private concise: boolean;
+  private graphKind: GraphKind = 'discrete';
 
   constructor(options: EngineOptions = {}) {
     const emit = (event: EngineEvent) => this.dispatch(event);
@@ -124,6 +134,45 @@ export class AudioHapticEngine {
       getSeriesIndex: () => this.explore.currentSeries,
       onArrive: (index) => this.onGuidanceArrive(index),
     });
+
+    this.explainMode = new ExplainMode({
+      getGraph: () => this.graph,
+      getPointCount: () => (this.graph ? pointCount(this.graph) : 0),
+      setTarget: (index) => this.guidance.start(index),
+      clearTarget: () => this.guidance.setTarget(null),
+      speak: (text, priority) => this.speech.speak(text, priority),
+      describe: (index) => this.explanationFor(index),
+      pulse: (pattern) => this.haptics.play(pattern),
+      onChange: () => this.broadcastStatus(),
+    });
+
+    this.on((event) => {
+      if (event.type === 'speech:idle') this.explainMode.handleSpeechIdle();
+    });
+  }
+
+  // -- graph kind -------------------------------------------------------------
+
+  /**
+   * Continuous curves get Overview only; discrete graphs also get Explain mode.
+   *
+   * Inferred from the data on load, but inference is a heuristic -- set it
+   * explicitly when the caller knows, for instance because the curve came from
+   * sampling a function rather than from extraction.
+   */
+  setGraphKind(kind: GraphKind): void {
+    this.graphKind = kind;
+    if (kind === 'continuous' && this.explainMode.active) this.explainMode.stop();
+    this.broadcastStatus();
+  }
+
+  getGraphKind(): GraphKind {
+    return this.graphKind;
+  }
+
+  /** Whether Explain mode is offered at all. False for continuous curves. */
+  get supportsExplainMode(): boolean {
+    return this.graphKind === 'discrete';
   }
 
   // -- Explore page: the four buttons -----------------------------------------
@@ -148,8 +197,59 @@ export class AudioHapticEngine {
     // Silent: guidance announces the first point on arrival, so speaking it
     // here as well would say it twice.
     this.explore.focus(0, { announce: false });
-    this.guidance.start(0);
+
+    // A continuous curve has no point worth stopping at, so guidance steers the
+    // finger onto the line and then simply follows it -- no target, no arrival.
+    // A discrete graph starts at the first point.
+    this.guidance.start(this.graphKind === 'continuous' ? null : 0);
     this.broadcastStatus();
+  }
+
+  // -- Explain mode (discrete graphs only) ------------------------------------
+
+  /**
+   * Walk the finger through every point in turn: steer, confirm with a `double`
+   * pulse on arrival, explain, then steer to the next once the explanation has
+   * finished speaking.
+   *
+   * Refused for continuous curves, which have no discrete points to stop on.
+   */
+  startExplainMode(from = 0): void {
+    if (!this.graph) {
+      this.speech.speak('No graph is loaded yet.', 'interrupt');
+      return;
+    }
+    if (this.graphKind === 'continuous') {
+      this.speech.speak(
+        'This is a continuous curve, so there are no separate points to explain. '
+        + 'Use Overview to trace its shape.',
+        'interrupt',
+      );
+      this.haptics.play('long');
+      return;
+    }
+    this.explainMode.start(from);
+  }
+
+  stopExplainMode(): void {
+    this.explainMode.stop();
+  }
+
+  /** Move on without waiting for the current explanation to finish. */
+  skipToNextExplanation(): void {
+    this.explainMode.skip();
+  }
+
+  /** The text Explain mode speaks at one point. */
+  private explanationFor(index: number): string {
+    if (!this.graph) return '';
+    return describePointOfInterest(
+      this.graph,
+      this.explore.currentSeries,
+      index,
+      this.interestAt(index),
+      this.fieldConfidence,
+    );
   }
 
   /**
@@ -248,6 +348,11 @@ export class AudioHapticEngine {
   /** Fired when the finger actually lands on the point it was steered toward. */
   private onGuidanceArrive(index: number): void {
     this.explore.focus(index, { announce: false });
+    if (this.explainMode.active) {
+      // The walkthrough owns what happens next: confirm, then explain.
+      this.explainMode.handleArrival(index);
+      return;
+    }
     this.speech.speak('Explain available.', 'interrupt');
     this.broadcastStatus();
   }
@@ -382,6 +487,8 @@ export class AudioHapticEngine {
   ): void {
     this.graph = graph;
     this.fieldConfidence = fieldConfidence;
+    this.graphKind = inferGraphKind(graph);
+    this.explainMode.stop();
     // Stale analysis must never outlive the graph it described.
     this.reasoning = null;
     this.sonifier.stop();
@@ -576,6 +683,7 @@ export class AudioHapticEngine {
    * call this so a repeated demo never starts with leftover audio.
    */
   stopAll(): void {
+    this.explainMode.stop();
     this.speech.stop();
     this.sonifier.stop();
     this.guidance.stop();
@@ -725,6 +833,9 @@ export class AudioHapticEngine {
       hasReasoning: this.reasoning !== null,
       speechVoices: this.speech.voiceCount,
       speechUsable: this.speech.usable,
+      graphKind: this.graphKind,
+      explaining: this.explainMode.active,
+      explainStep: this.explainMode.step,
       guiding: this.guidance.isActive,
       targetIndex: this.guidance.getTarget(),
     };
@@ -736,6 +847,7 @@ export { SpeechQueue, chunkText } from './speech.js';
 export { Sonifier } from './sonification.js';
 export { Explorer } from './explorer.js';
 export { Guidance, fromPointerEvent } from './guidance.js';
+export { ExplainMode } from './explain-mode.js';
 export {
   RING_PATTERN_LABELS,
   createRingBinding,

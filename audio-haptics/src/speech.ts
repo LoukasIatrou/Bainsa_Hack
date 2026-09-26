@@ -354,7 +354,11 @@ export class SpeechQueue {
     if (this.paused) return;
     const next = this.queue.shift();
     if (!next) {
+      const wasSpeaking = this.current !== null;
       this.current = null;
+      // Drained. Callers that sequence on speech completion (the Explain
+      // walkthrough) key off this rather than guessing at durations.
+      if (wasSpeaking) this.emit({ type: 'speech:idle' });
       return;
     }
 
@@ -426,6 +430,10 @@ export class SpeechQueue {
     this.chunks = [];
     this.chunkIndex = 0;
     if (finished) this.emit({ type: 'speech:end', text: finished.text });
+    if (this.queue.length === 0) {
+      this.emit({ type: 'speech:idle' });
+      return;
+    }
     this.startNext();
   }
 }

@@ -5,7 +5,7 @@
  * a normal case, not an error.
  */
 
-import type { GraphData, Series } from './types.js';
+import type { GraphData, GraphKind, Series } from './types.js';
 
 export function numericValues(series: Series): number[] {
   return series.values.filter((v): v is number => v !== null);
@@ -113,6 +113,32 @@ export function pointCount(graph: GraphData): number {
 export function xLabel(graph: GraphData, index: number): string {
   return graph.xAxis.values[index] ?? `position ${index + 1}`;
 }
+
+/**
+ * Guess whether a graph is a sampled function or a set of labelled points.
+ *
+ * A densely sampled curve has many points and bare numeric x labels; a real
+ * data series has few points with meaningful labels ("March", "Q3", "2020").
+ * The threshold is a heuristic, so callers can always override it with
+ * `engine.setGraphKind()` -- getting it wrong only changes which modes are
+ * offered, never what is spoken.
+ */
+export function inferGraphKind(graph: GraphData): GraphKind {
+  const labels = graph.xAxis.values;
+  if (labels.length >= CONTINUOUS_POINT_THRESHOLD) return 'continuous';
+
+  // All-numeric labels with no gaps read as a sampled domain rather than
+  // categories, but only once there are enough of them to trace meaningfully.
+  const allNumeric = labels.length > 0 && labels.every((v) => v.trim() !== '' && !Number.isNaN(Number(v)));
+  if (allNumeric && labels.length >= NUMERIC_CONTINUOUS_THRESHOLD) return 'continuous';
+
+  return 'discrete';
+}
+
+/** At or above this many points, stopping on each one stops being useful. */
+export const CONTINUOUS_POINT_THRESHOLD = 40;
+/** Numeric labels need to be denser than categorical ones to count as continuous. */
+export const NUMERIC_CONTINUOUS_THRESHOLD = 25;
 
 /** Normalise a value into 0-1 across a range, clamped. Flat ranges map to the middle. */
 export function normalise(value: number, min: number, max: number): number {
