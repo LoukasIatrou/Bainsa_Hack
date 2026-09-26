@@ -10,7 +10,7 @@
  *   npx tsx test/fixtures.test.ts     (or: npm test)
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import assert from 'node:assert/strict';
@@ -346,6 +346,53 @@ console.log("\nPerson 2's real ReasoningResponse");
       assertSpeakable(reasoning.answers[q].answer, q);
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// Person 1's REAL capture output (docs/capture-examples/). Messier than the
+// hand-written fixtures: untitled graphs, missing units, bar charts rejected.
+// This is what the engine will actually be handed on the day.
+// ---------------------------------------------------------------------------
+
+console.log("\nPerson 1's real captures");
+{
+  const dir = join(here, '..', '..', 'docs', 'capture-examples');
+  const files = readdirSync(dir).filter((f) => f.endsWith('.json')).sort();
+
+  check('capture examples are present', () => assert.ok(files.length >= 7));
+
+  for (const file of files) {
+    const res = JSON.parse(readFileSync(join(dir, file), 'utf8')) as ExtractionResponse;
+
+    check(`${file}: every spoken string is clean`, () =>
+      everySpokenString(res).forEach((t, i) => assertSpeakable(t, `${file}[${i}]`)));
+
+    if (res.status === 'error') {
+      check(`${file}: failure is spoken with a recovery action`, () => {
+        const line = describeExtractionStatus(res);
+        assert.ok(line, 'error status produced nothing to say');
+        assert.ok(line!.startsWith('Extraction failed.'), line!);
+      });
+      continue;
+    }
+
+    const graph = res.graph as GraphData;
+
+    check(`${file}: point readout matches the agreed "{x}, {value}{unit}" shape`, () => {
+      const line = describePoint(graph, 0, 0, res.fieldConfidence, { includePosition: false });
+      // docs/phone-demo-navigation.md 2: the x label must reach the listener,
+      // because it is the only way they learn where they are.
+      assert.ok(line.includes(graph.xAxis.values[0]!), `x label missing from: ${line}`);
+    });
+
+    if (graph.yAxis.unit === null || graph.yAxis.unit === undefined) {
+      check(`${file}: missing unit is announced once, not repeated per point`, () => {
+        assert.ok(describeGraphIntro(graph, res.fieldConfidence).includes('unit could not be read'));
+        const point = describePoint(graph, 0, 0, res.fieldConfidence);
+        assert.ok(!point.includes('could not be read'), `unit caveat leaked into: ${point}`);
+      });
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

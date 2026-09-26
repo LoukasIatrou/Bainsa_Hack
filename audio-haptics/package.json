@@ -20,7 +20,8 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsx test/fixtures.test.ts",
-    "start": "./dev.sh"
+    "start": "./dev.sh",
+    "test:speech": "./test-speech.sh"
   },
   "devDependencies": {
     "@types/node": "^26.6.3",

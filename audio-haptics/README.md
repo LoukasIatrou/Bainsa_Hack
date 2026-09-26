@@ -174,6 +174,25 @@ Or by hand:
 npm run dev -- --host      # then open http://<laptop-ip>:5173 on the phone
 ```
 
+### Proving speech is audible
+
+`speak()` accepts the text and fires every event even when the browser makes no
+sound, so "it didn't throw" proves nothing. Two tools:
+
+```bash
+npm run test:speech     # records the audio device and measures the signal
+```
+
+It checks the system chain (speech-dispatcher to espeak-ng) automatically, then
+gives you a window to press **Speak test** in the harness and measures whether
+browser speech reached the device. Peak and RMS are reported, so the verdict is
+a measurement rather than an opinion.
+
+In the harness, **Speak test** speaks a known phrase and reports whether
+`speech:start` fired, the voice count and the chosen voice. Together the two
+separate the three failures that look identical: no voices, no signal, wrong
+output device.
+
 ### Desktop speech needs a flag
 
 **Chrome on Linux reports ZERO SpeechSynthesis voices by default** and `speak()`

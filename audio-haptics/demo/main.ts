@@ -146,6 +146,30 @@ $('unlock').addEventListener('click', async () => {
 
 $('testPattern').addEventListener('click', () => engine.playPattern('double'));
 
+$('speakTest').addEventListener('click', async () => {
+  const out = $('diagnostic');
+  out.style.display = 'block';
+  await engine.unlock();
+  const phrase = 'Speech test. March, twelve degrees Celsius. This is the highest point.';
+  let started = false;
+  const off = engine.on((ev) => { if (ev.type === 'speech:start') started = true; });
+  engine.speech.speak(phrase, 'interrupt');
+  // Give it time to actually begin before judging.
+  await new Promise((r) => setTimeout(r, 1800));
+  off();
+  out.textContent = [
+    `Spoke: "${phrase}"`,
+    `speech:start fired   ${started ? 'YES' : 'NO'}`,
+    `Voices available     ${engine.speech.voiceCount}`,
+    `Voice chosen         ${engine.speech.voiceName ?? '(none)'}`,
+    '',
+    started
+      ? 'The API accepted and began the utterance. If you heard nothing, run'
+      : 'The utterance never started. There are no usable voices in this browser.',
+    started ? './test-speech.sh to check whether audio reached the device.' : '',
+  ].join('\n');
+});
+
 $('diagnose').addEventListener('click', async () => {
   const out = $('diagnostic');
   out.style.display = 'block';
