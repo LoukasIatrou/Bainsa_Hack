@@ -3,7 +3,7 @@ import { engine, fromPointerEvent, normalise, pointCount, valueRange } from './e
 import type { EngineStatus } from './engine'
 import type { PlotBox } from './engine/curve'
 import { lineRuns, runsCurve, runsPath } from './engine/line'
-import { explainPoint, installMenu, installWalkGuard } from './engine/menu'
+import { explainPoint, installMenu, installWalkGuard, toggleMenu } from './engine/menu'
 import { EngineRing } from './spiderSense/EngineRing'
 import { INITIAL_STATE, stepSpiderSense } from './spiderSense/logic'
 import type { Curve, Point, SpiderSenseState } from './spiderSense/logic'
@@ -181,7 +181,7 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
         clearTimeout(single)
         single = null
         lastTap = 0
-        engine.menu.toggleMode()
+        toggleMenu()
         return
       }
       lastTap = now
@@ -245,7 +245,7 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
       // Android fires contextmenu on a long press: that must not open the menu (long press
       // explains the point). Only a real mouse right-click switches modes.
       e.preventDefault()
-      if (lastPointerType.current === 'mouse') engine.menu.toggleMode()
+      if (lastPointerType.current === 'mouse') toggleMenu()
     }
     el.addEventListener('pointerdown', down)
     el.addEventListener('pointermove', move)
@@ -268,7 +268,7 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
     const key = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return
       const k = e.key
-      if (k === 'm' || k === 'M') engine.menu.toggleMode()
+      if (k === 'm' || k === 'M') toggleMenu()
       else if (modeRef.current !== 'menu') return
       else if (k === 'ArrowDown' || k === 'ArrowRight') engine.menu.next()
       else if (k === 'ArrowUp' || k === 'ArrowLeft') engine.menu.previous()

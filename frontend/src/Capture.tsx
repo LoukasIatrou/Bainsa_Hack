@@ -21,28 +21,42 @@ export function Capture({ onCapture }: CaptureProps) {
 
   useEffect(() => {
     let stream: MediaStream | null = null
+    // The effect can run twice in quick succession (React dev StrictMode, fast remounts). A camera
+    // request that resolves after its effect was cleaned up must not touch the video element.
+    let cancelled = false
+    const video = videoRef.current
+    const onPlaying = () => setStatus('ready')
+    video?.addEventListener('playing', onPlaying)
 
     navigator.mediaDevices
       ?.getUserMedia({ video: { facingMode: 'environment' } })
       .then((s) => {
+        if (cancelled || !video) {
+          s.getTracks().forEach((track) => track.stop())
+          return
+        }
         stream = s
-        const video = videoRef.current
-        if (!video) return
         video.srcObject = s
         // Some mobile browsers don't reliably autoplay after srcObject is
         // set imperatively, even with the autoPlay attribute - kick it off
         // explicitly so the feed doesn't sit on a black frame.
         video.play().then(() => setStatus('ready')).catch((err) => {
+          // "The play() request was interrupted by a new load request" is an AbortError from a
+          // newer srcObject replacing this one: harmless, the 'playing' event still follows.
+          if (cancelled || (err instanceof DOMException && err.name === 'AbortError')) return
           setCameraError(err instanceof Error ? err.message : 'Could not start camera preview.')
           setStatus('error')
         })
       })
       .catch((err) => {
+        if (cancelled) return
         setCameraError(err instanceof Error ? err.message : 'Camera unavailable.')
         setStatus('error')
       })
 
     return () => {
+      cancelled = true
+      video?.removeEventListener('playing', onPlaying)
       stream?.getTracks().forEach((track) => track.stop())
     }
   }, [])

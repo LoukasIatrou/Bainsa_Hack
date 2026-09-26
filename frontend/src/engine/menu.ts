@@ -29,6 +29,39 @@ export function explainPoint(index: number): void {
   else engine.explain()
 }
 
+// Switch modes. Person 3's own graph-mode announcement says "Two-finger tap to return to the
+// menu", which is no longer true (the menu is double-tap only), so it is replaced here.
+export function toggleMenu(): void {
+  engine.menu.toggleMode()
+  if (engine.getMode() === 'graph') engine.speech.speak('Graph mode. Double-tap opens the menu.', 'interrupt')
+}
+
+// Next point, looping: Person 2's landmark stops (start, lows, peaks, max, min, end) in order;
+// after the last one it goes back to the first. His nextPoint() stops at the end instead.
+export function runNext(): void {
+  const graph = engine.getGraph()
+  if (!graph) return
+  const series = graph.series[engine.explore.currentSeries] ?? graph.series[0]
+  const reasoning = engine.getReasoning() as unknown as {
+    series?: { name: string; interestPoints?: { index: number }[] }[]
+  } | null
+  let stops = reasoning?.series?.find((s) => s.name === series.name)?.interestPoints?.map((p) => p.index) ?? []
+  if (!stops.length) stops = series.values.flatMap((v, i) => (v === null ? [] : [i]))
+  stops = [...new Set(stops)].sort((a, b) => a - b)
+  if (!stops.length) return
+  const from = engine.guidance.getCurrentIndex() ?? engine.guidance.getTarget() ?? engine.explore.currentPoint
+  const after = stops.find((i) => i > from)
+  const next = after ?? stops[0]
+  stopWalk()
+  engine.setMode('graph')
+  // Start guidance BEFORE speaking: the engine re-broadcasts its status (new target) on speech.
+  engine.guidance.start(next)
+  engine.speech.speak(
+    after === undefined ? 'Back to the start. Follow the vibration.' : 'Follow the vibration to the next point.',
+    'interrupt',
+  )
+}
+
 export function runOverview(): void {
   stopWalk()
   engine.setMode('graph')
@@ -103,11 +136,7 @@ export function installMenu(onStartOver: () => void): void {
       label: 'Next point',
       hint: 'Guides you to the next peak or low.',
       available: hasGraph,
-      activate: () => {
-        stopWalk()
-        engine.setMode('graph')
-        engine.nextPoint()
-      },
+      activate: runNext,
     },
     {
       id: 'explain',
