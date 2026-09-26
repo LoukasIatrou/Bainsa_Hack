@@ -33,8 +33,17 @@ class _ModelOutput(GraphData):
     message: str | None = None
 
 
+_client_instance: genai.Client | None = None
+
+
 def _client() -> genai.Client:
-    return genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    # Cached rather than constructed per-call: genai.Client closes its
+    # underlying httpx client on __del__, so a client built inline as
+    # `_client().models...` gets garbage-collected (and closed) mid-request.
+    global _client_instance
+    if _client_instance is None:
+        _client_instance = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    return _client_instance
 
 
 def extract_graph(image_bytes: bytes, mime_type: str) -> ExtractionResponse:
