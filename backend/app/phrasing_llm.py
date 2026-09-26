@@ -12,9 +12,9 @@ from concurrent.futures import TimeoutError as FutureTimeout
 
 from pydantic import BaseModel
 
+from .extraction import _model  # same model as extraction
 from .schemas import ReasoningResponse
 
-_MODEL = "gemini-2.5-flash"  # same model as extraction
 _TIMEOUT_SECONDS = 3.0
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 
@@ -53,7 +53,7 @@ def _call_gemini(texts: _Texts) -> _Texts:
 
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     response = client.models.generate_content(
-        model=_MODEL,
+        model=_model(),
         contents=[_PROMPT + texts.model_dump_json(indent=2)],
         config=types.GenerateContentConfig(
             response_mime_type="application/json",

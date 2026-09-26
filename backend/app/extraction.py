@@ -6,7 +6,13 @@ from pydantic import BaseModel, ValidationError
 
 from .schemas import ExtractionResponse, FieldConfidence, GraphData
 
-_MODEL = "gemini-2.5-flash"
+# gemini-2.5-flash is closed to new API keys ("no longer available to new users"); override with
+# GEMINI_MODEL in backend/.env if an older key still needs it. Read per call, after load_dotenv().
+_DEFAULT_MODEL = "gemini-3.8-flash"
+
+
+def _model() -> str:
+    return os.getenv("GEMINI_MODEL") or _DEFAULT_MODEL
 _CONFIDENCE_THRESHOLD = 0.6
 
 _PROMPT = """You are extracting structured data from an image of a LINE GRAPH for a blind or low-vision user.
@@ -81,7 +87,7 @@ def extract_graph(image_bytes: bytes, mime_type: str) -> ExtractionResponse:
 
     try:
         response = client.models.generate_content(
-            model=_MODEL,
+            model=_model(),
             contents=[
                 _PROMPT,
                 types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
