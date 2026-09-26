@@ -26,8 +26,10 @@ Scope for now: **line graphs only**. Other chart types are future scope.
 
 - `POST /reason` turns the confirmed graph into everything the Explore page needs, in **one call**:
   the Overview text (one sentence of shape; Person 3 speaks the axes), the ring `trace` (slope angle and strength along the
-  curve), the Next point stops (`interestPoints`) with their Explain text, and per-point values.
-  After that, exploration needs no network, and the response can be cached as-is for fallback mode.
+  curve), the Next point stops (`interestPoints`, big landmarks only, at most 6), per-point values with a brief
+  readout and an Explain text (`points[].explain`, including the change from the previous point).
+  After that, exploration needs no network. A saved demo response for fallback mode is in
+  `contracts/examples/reason-unemployment.json`.
 - The ring is the main output; speech is kept brief. Every number is computed deterministically;
   Gemini's `summary` is ignored. With `USE_LLM=1`, Gemini may reword the overview and answers, but
   any new number, error or timeout (3 s) falls back to templates.
