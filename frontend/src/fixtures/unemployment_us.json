@@ -1,0 +1,31 @@
+{
+  "status": "ok",
+  "graph": {
+    "graphType": "line",
+    "title": "US unemployment rate, yearly average",
+    "xAxis": {
+      "label": "Year",
+      "values": ["2016", "2017", "2018", "2019", "2020", "2021", "2022", "2023", "2024"]
+    },
+    "yAxis": {
+      "label": "Unemployment rate",
+      "unit": "%"
+    },
+    "series": [
+      {
+        "name": "Unemployment rate",
+        "values": [4.9, 4.4, 3.9, 3.7, 8.1, 5.4, 3.7, 3.6, 4.0]
+      }
+    ],
+    "summary": null,
+    "confidence": 0.9
+  },
+  "fieldConfidence": {
+    "graphType": 0.98,
+    "title": 0.95,
+    "xAxis": 0.95,
+    "yAxis": 0.92,
+    "series": 0.88
+  },
+  "message": null
+}
