@@ -1,0 +1,63 @@
+.spider-sense {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  touch-action: none;
+  user-select: none;
+  border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 12px;
+  --spider-color: #ffd400;
+}
+
+.spider-sense--on-curve {
+  --spider-color: #4caf50;
+}
+
+.spider-sense__curve {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linejoin: round;
+}
+
+.spider-sense__contact {
+  fill: #e53935;
+}
+
+.spider-sense__circle {
+  fill: color-mix(in srgb, var(--spider-color) 12%, transparent);
+  stroke: var(--spider-color);
+  stroke-width: 2;
+}
+
+.spider-sense__pulse {
+  fill: none;
+  stroke: var(--spider-color);
+  stroke-width: 2;
+}
+
+.spider-sense__tick {
+  stroke: var(--spider-color);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.spider-sense__finger {
+  fill: var(--spider-color);
+}
+
+.spider-sense-demo {
+  height: 100svh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.5rem;
+}
+
+.spider-sense-demo__readout {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9rem;
+  margin: 0;
+}
