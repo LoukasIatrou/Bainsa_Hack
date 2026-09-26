@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { engine, fromPointerEvent, normalise, pointCount, valueRange } from './engine'
 import type { EngineStatus, GuidanceReading, HapticPatternName } from './engine'
-import { installMenu, installWalkGuard } from './engine/menu'
+import { installMenu, installWalkGuard, runAsk, runOverview, runStop } from './engine/menu'
 import type { PlotBox } from './engine/curve'
 import { runsCurve, runsPath, smoothRuns } from './engine/smooth'
 import { EngineRing } from './spiderSense/EngineRing'
@@ -28,7 +28,8 @@ interface ExplorePageProps {
 // Plot inner box padding inside the framed panel (room for the faint labels).
 // Top/bottom room so the ring isn't cut off at the highest and lowest points.
 const PAD = { left: 38, right: 24, top: 36, bottom: 34 }
-const SOURCE_LABEL: Record<GraphSource, string> = { live: 'Live', controlled: 'Controlled', saved: 'Saved' }
+// Honest labels (Person 3's runbook): say whether this is a live photo or the known graph.
+const SOURCE_LABEL: Record<GraphSource, string> = { live: 'live capture', controlled: 'uploaded image', saved: 'cached extraction' }
 const MENU_HINTS = 'swipe → ↓ next · swipe ← ↑ previous · tap: choose · long press: repeat · 2-finger tap: graph'
 const GRAPH_HINTS = 'move / drag: follow the ring from the start · tap: read point · long press: explain point · 2-finger tap: menu'
 
@@ -58,6 +59,8 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
   const [reading, setReading] = useState<GuidanceReading | null>(null)
   const [lastSpoken, setLastSpoken] = useState('')
   const [lastPattern, setLastPattern] = useState<HapticPatternName | null>(null)
+  const [lastMeaning, setLastMeaning] = useState('')
+  const [hasReasoning, setHasReasoning] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   // The ring follows the pointer (mouse hover or finger) and always shows the way along the line.
   // Tagged with the curve it was computed on: a new curve (resize, series switch) starts over.
@@ -83,7 +86,10 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
           setReading(null)
         }
       } else if (event.type === 'speech:caption') setLastSpoken(event.text)
-      else if (event.type === 'haptic:pattern') setLastPattern(event.pattern)
+      else if (event.type === 'haptic:pattern') {
+        setLastPattern(event.pattern)
+        setLastMeaning(event.meaning)
+      }
       else if (event.type === 'focus:change') setSeriesIndex(event.series)
     })
     const offGuard = installWalkGuard()
@@ -151,6 +157,7 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
       fetchReasoning(box.height / box.width)
         .then((r) => {
           engine.setReasoning(toEngine(r))
+          setHasReasoning(true)
           intro('')
         })
         .catch(() => intro('Reasoning unavailable. '))
@@ -190,8 +197,14 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
     }
     const move = (e: PointerEvent) => {
       engine.gestures.pointerMove(e)
-      // A mouse is the simulated ring: it steers on hover too, no button needed.
-      if (e.pointerId === active || (active === null && e.pointerType === 'mouse')) draw(e)
+      // A mouse is the simulated ring: it steers on hover too, no button needed. Like Person 3's
+      // demo page, hover also feeds engine.guide so the buzz and readouts follow the mouse.
+      if (e.pointerId === active) draw(e)
+      else if (active === null && e.pointerType === 'mouse') {
+        draw(e)
+        const f = toData(e.clientX, e.clientY)
+        if (f && modeRef.current === 'graph') engine.guide(f.x, f.y)
+      }
     }
     const end = (e: PointerEvent, cancel: boolean) => {
       if (cancel) engine.gestures.pointerCancel(e)
@@ -304,8 +317,10 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
   else if (target !== null) parts.push(`target ${graph.xAxis.values[target] ?? target + 1}`)
   if (graph.series.length > 1) parts.push(`line ${seriesIndex + 1}/${graph.series.length}: ${series?.name}`)
   if (status.graphKind === 'continuous') parts.push('continuous')
-  if (lastPattern) parts.push(`buzz ${lastPattern}`)
+  if (lastPattern) parts.push(`pulse ${lastPattern}: ${lastMeaning}`)
 
+  // Saved graphs arrive with their reasoning; live ones get it from /reason.
+  const canAsk = reasoning !== null || hasReasoning
   const xs = graph.xAxis.values
   const labelIdx = [...new Set([0, Math.floor((n - 1) / 2), n - 1])]
 
@@ -325,6 +340,7 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
         </button>
       </header>
 
+      <div className="explore__body">
       <div className="explore__panel" ref={panelRef} role="application" aria-label={`Graph: ${graph.title}`}>
         {box && (
           <div
@@ -379,6 +395,42 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
             {ring && <EngineRing {...ring} radius={ringRadius} />}
           </svg>
         )}
+      </div>
+
+      {/* The demo walkthrough's steps (docs/person3-demo.md). Gestures still work for a blind user. */}
+      <nav className="explore__actions" aria-label="Actions">
+        <button type="button" className="explore__action explore__action--primary" onClick={runOverview}>
+          Overview
+        </button>
+        <button type="button" className="explore__action" onClick={() => engine.nextPoint()}>
+          Next point
+        </button>
+        <button type="button" className="explore__action" onClick={() => engine.explain()}>
+          Explain
+        </button>
+        <button
+          type="button"
+          className="explore__action"
+          disabled={!canAsk}
+          title={canAsk ? undefined : 'Needs /reason'}
+          onClick={() => runAsk('max')}
+        >
+          Where is the maximum?
+        </button>
+        <button type="button" className="explore__action explore__action--ghost" onClick={runStop}>
+          Stop speaking
+        </button>
+        <button
+          type="button"
+          className="explore__action explore__action--ghost"
+          onClick={() => {
+            engine.stopAll()
+            onReset()
+          }}
+        >
+          Start over
+        </button>
+      </nav>
       </div>
 
       <p className="explore__status" data-testid="status">

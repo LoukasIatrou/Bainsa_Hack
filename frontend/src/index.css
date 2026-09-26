@@ -465,3 +465,113 @@ body {
 .confirm-debug pre {
   overflow-x: auto;
 }
+
+/* Panel + slim action column for the demo walkthrough. */
+.explore__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 8px;
+}
+
+.explore__body .explore__panel {
+  flex: 1;
+  min-width: 0;
+}
+
+.explore__actions {
+  flex: none;
+  width: 150px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.explore__action {
+  flex: 1;
+  min-height: 36px;
+  max-height: 64px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.2;
+  color: #eee;
+  background: transparent;
+  border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.explore__action--primary {
+  border-color: #ffd400;
+}
+
+.explore__action--ghost {
+  opacity: 0.7;
+}
+
+.explore__action:active {
+  background: #ffd400;
+  color: #141414;
+}
+
+.explore__action:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.explore__action:focus-visible {
+  outline: 3px solid #ffd400;
+  outline-offset: 2px;
+}
+
+/* Confirmation screen: axes and a confidence bar per field (low ones in a warning colour). */
+.confirm-screen__meta {
+  opacity: 0.75;
+}
+
+.confirm-screen__axes {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 6px 0;
+}
+
+.confirm-screen__axes dt {
+  opacity: 0.6;
+}
+
+.confirm-screen__axes dd {
+  margin: 0;
+}
+
+.confidence {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 10px;
+  font-size: 13px;
+}
+
+.confidence__row {
+  display: grid;
+  grid-template-columns: 90px 1fr 42px;
+  align-items: center;
+  gap: 8px;
+}
+
+.confidence__bar {
+  height: 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, currentColor 15%, transparent);
+  overflow: hidden;
+}
+
+.confidence__fill {
+  display: block;
+  height: 100%;
+  background: #4caf50;
+}
+
+.confidence__fill--low {
+  background: #ffb300;
+}

@@ -16,6 +16,43 @@ function stopWalk(): void {
   engine.stopExplainMode()
 }
 
+// Shared by the menu and the demo buttons, so both get the same walk workarounds.
+export function runOverview(): void {
+  engine.stopExplainMode()
+  pausedAt = null
+  engine.setMode('graph')
+  engine.startOverview()
+  for (const caveat of engine.getReasoning()?.overview.caveats ?? []) engine.speech.speak(caveat, 'normal')
+}
+
+export function runStop(): void {
+  stopWalk()
+  engine.stopSpeaking()
+}
+
+// Preset question. His ask() speaks the answer with 'interrupt' and then focuses the point,
+// whose readout is also 'interrupt' - so the answer is cut off before it is heard. Same steps
+// here, but the move to the point is silent (one 'double' pulse), so the answer plays in full.
+export function runAsk(question: 'max'): void {
+  const answer = engine.getReasoning()?.answers?.[question]
+  const graph = engine.getGraph()
+  if (!answer || !graph) {
+    engine.ask(question)
+    return
+  }
+  engine.speech.speak(answer.answer, 'interrupt')
+  for (const caveat of answer.caveats) engine.speech.speak(caveat, 'normal')
+  const first = answer.highlight[0]
+  if (first) {
+    const seriesIndex = graph.series.findIndex((s) => s.name === first.series)
+    if (seriesIndex >= 0) engine.explore.selectSeries(seriesIndex, { announce: false })
+    engine.explore.focus(first.index, { announce: false, pattern: 'double' })
+    // Then steer the finger to the evidence, like Next point does.
+    engine.setMode('graph')
+    engine.guidance.start(first.index)
+  }
+}
+
 export function installMenu(): void {
   pausedAt = null
   const items: MenuItem[] = [
@@ -24,13 +61,7 @@ export function installMenu(): void {
       label: 'Overview',
       hint: 'Hear the shape of the whole graph.',
       available: () => engine.getGraph() !== null,
-      activate: () => {
-        engine.stopExplainMode()
-        pausedAt = null
-        engine.setMode('graph')
-        engine.startOverview()
-        for (const caveat of engine.getReasoning()?.overview.caveats ?? []) engine.speech.speak(caveat, 'normal')
-      },
+      activate: runOverview,
     },
     {
       id: 'explain',
@@ -72,10 +103,7 @@ export function installMenu(): void {
     {
       id: 'stop',
       label: 'Stop speaking',
-      activate: () => {
-        stopWalk()
-        engine.stopSpeaking()
-      },
+      activate: runStop,
     },
   ]
   engine.menu.setItems(items)

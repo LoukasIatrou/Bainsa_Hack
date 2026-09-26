@@ -47,6 +47,21 @@ function confirmSpeech(result: ExtractionResponse): string {
   return [found, status, fields, 'Looks right, or retake?'].filter(Boolean).join(' ')
 }
 
+const SOURCE_TEXT: Record<GraphSource, string> = {
+  live: 'live capture',
+  controlled: 'uploaded image',
+  saved: 'cached extraction',
+}
+const FIELD_LABELS: [keyof FieldConfidence, string][] = [
+  ['graphType', 'Graph type'],
+  ['title', 'Title'],
+  ['xAxis', 'X axis'],
+  ['yAxis', 'Y axis'],
+  ['series', 'Values'],
+]
+// Same threshold as extraction and /reason: below this a field needs the user's attention.
+const LOW = 0.6
+
 function App() {
   const [state, setState] = useState<AppState>(START_IN_SLIDER ? 'slider' : START_SAVED ? 'explore' : 'capture')
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -85,6 +100,11 @@ function App() {
 
   function confirm() {
     if (!result?.graph || !graphOk) return
+    if (source === 'saved') {
+      setExplored({ ...SAVED, id: Date.now() })
+      setState('explore')
+      return
+    }
     const graph = result.graph
     const fieldConfidence = result.fieldConfidence ?? null
     setExplored({
@@ -98,9 +118,14 @@ function App() {
     setState('explore')
   }
 
+  // The known graph goes through the same confirmation step as a photo (demo step 3).
   function openSaved() {
-    setExplored({ ...SAVED, id: Date.now() })
-    setState('explore')
+    setSource('saved')
+    setPreviewUrl(null)
+    setRequestError(null)
+    setResult(SAVED_EXTRACTION)
+    engine.speech.speak(confirmSpeech(SAVED_EXTRACTION), 'interrupt')
+    setState('confirm')
   }
 
   function reset() {
@@ -131,7 +156,7 @@ function App() {
               <input type="file" accept="image/*" onChange={onUpload} data-testid="upload" />
             </label>
             <button type="button" className="capture-extras__link" onClick={openSaved}>
-              Use saved graph
+              Use the known graph
             </button>
           </div>
         </div>
@@ -154,11 +179,52 @@ function App() {
             ) : graphOk && result?.graph ? (
               <>
                 <h1>{result.graph.title}</h1>
-                <p>
-                  Line graph · {result.graph.xAxis.values.length} points · {result.graph.series.length} line
-                  {result.graph.series.length > 1 ? 's' : ''} · {source === 'controlled' ? 'Controlled' : 'Live'}
+                <p className="confirm-screen__meta">
+                  {SOURCE_TEXT[source]} · line graph · {result.graph.xAxis.values.length} points ·{' '}
+                  {result.graph.series.length} line{result.graph.series.length > 1 ? 's' : ''}
                   {result.status === 'low_confidence' && <strong> · low confidence</strong>}
                 </p>
+                <dl className="confirm-screen__axes">
+                  <dt>X axis</dt>
+                  <dd>
+                    {result.graph.xAxis.label}: {result.graph.xAxis.values[0]} to{' '}
+                    {result.graph.xAxis.values[result.graph.xAxis.values.length - 1]}
+                  </dd>
+                  <dt>Y axis</dt>
+                  <dd>
+                    {result.graph.yAxis.label}
+                    {result.graph.yAxis.unit ? ` (${result.graph.yAxis.unit})` : ' (unit unreadable)'}
+                  </dd>
+                </dl>
+                <div className="confidence" data-testid="confidence">
+                  <div className="confidence__row">
+                    <span>Overall</span>
+                    <span className="confidence__bar">
+                      <span
+                        className={result.graph.confidence < LOW ? 'confidence__fill confidence__fill--low' : 'confidence__fill'}
+                        style={{ width: `${Math.round(result.graph.confidence * 100)}%` }}
+                      />
+                    </span>
+                    <span>{Math.round(result.graph.confidence * 100)}%</span>
+                  </div>
+                  {result.fieldConfidence &&
+                    FIELD_LABELS.map(([key, label]) => {
+                      const v = result.fieldConfidence?.[key]
+                      if (v === undefined || v === null) return null
+                      return (
+                        <div className="confidence__row" key={key}>
+                          <span>{label}</span>
+                          <span className="confidence__bar">
+                            <span
+                              className={v < LOW ? 'confidence__fill confidence__fill--low' : 'confidence__fill'}
+                              style={{ width: `${Math.round(v * 100)}%` }}
+                            />
+                          </span>
+                          <span>{Math.round(v * 100)}%</span>
+                        </div>
+                      )
+                    })}
+                </div>
                 {result.status === 'low_confidence' && (
                   <p className="confirm-screen__warn">
                     {describeExtractionStatus(result)} {describeFieldsNeedingConfirmation(result.fieldConfidence)}
