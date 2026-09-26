@@ -473,3 +473,74 @@ engine.handleExtraction = (response) => {
   originalHandle(response);
   drawCurve();
 };
+
+
+// ---------------------------------------------------------------------------
+// Gesture test surface -- the only way to try swipes and the mode toggle,
+// since none of it can be exercised with a mouse on a laptop.
+// ---------------------------------------------------------------------------
+
+const pad = $('gesturePad');
+const gestureLog = $('gestureLog');
+const gestureMode = $('gestureMode');
+const gestureItem = $('gestureItem');
+
+// Drags need normalised data space; the chart is the surface they refer to.
+engine.setPointerConverter((clientX, clientY) => {
+  const rect = chart.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return null;
+  return {
+    x: (clientX - rect.left) / rect.width,
+    y: 1 - (clientY - rect.top) / rect.height,
+  };
+});
+
+pad.addEventListener('pointerdown', (e) => {
+  // Capture keeps a drag alive if the finger leaves the pad, but it throws for
+  // a pointer the browser does not consider active. Never let that abort the
+  // handler -- the gesture matters, the capture is a convenience.
+  try {
+    pad.setPointerCapture(e.pointerId);
+  } catch {
+    // Not capturable; gestures still work.
+  }
+  engine.gestures.pointerDown(e);
+  e.preventDefault();
+});
+pad.addEventListener('pointermove', (e) => {
+  engine.gestures.pointerMove(e);
+  e.preventDefault();
+});
+pad.addEventListener('pointerup', (e) => {
+  engine.gestures.pointerUp(e);
+  e.preventDefault();
+});
+pad.addEventListener('pointercancel', (e) => {
+  engine.gestures.pointerCancel(e);
+});
+
+function renderGestureState(): void {
+  const s = engine.getStatus();
+  const graphMode = s.mode === 'graph';
+  pad.classList.toggle('graph', graphMode);
+  gestureMode.textContent = graphMode ? 'GRAPH MODE' : 'MENU MODE';
+  gestureItem.textContent = graphMode
+    ? 'Drag to follow the curve'
+    : `${s.menuItem ?? '—'}  (${s.menuPosition.index + 1} of ${s.menuPosition.total})`;
+}
+
+engine.on((event) => {
+  if (event.type === 'status:change') renderGestureState();
+  if (event.type === 'speech:caption') {
+    gestureLog.textContent = event.text;
+  }
+});
+renderGestureState();
+
+const vibeToggle = $<HTMLInputElement>('vibeToggle');
+vibeToggle.addEventListener('change', () => {
+  engine.haptics.setEnabled('vibration', vibeToggle.checked);
+  gestureLog.textContent = vibeToggle.checked
+    ? 'Phone vibration enabled. If nothing moves, this handset is ignoring it.'
+    : 'Phone vibration off. The audio buzz and the ring carry the haptics.';
+});

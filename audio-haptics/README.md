@@ -167,6 +167,23 @@ the flash can never disagree about which point they are showing.
 exposes `navigator.vibrate` and silently does nothing, with no way to detect
 the difference, and doc 4 forbids the ring implying hardware it cannot confirm.
 
+## Phone vibration is OFF by default
+
+`navigator.vibrate()` is accepted and then silently ignored on a great many
+Android builds -- OEM skins, battery saver, Do Not Disturb -- and the API never
+reports that it did nothing. Rather than let the demo lean on a channel that
+cannot be verified, the **audio-tactile buzz and the ring simulator carry the
+haptic meaning**, and vibration is opt-in:
+
+```ts
+new AudioHapticEngine({ vibration: true });   // once a human has felt it work
+engine.haptics.setEnabled('vibration', true); // or at runtime
+```
+
+Nothing else changes when it is off: the same five patterns fire, the same
+`haptic:pattern` events reach the simulator, and the buzz makes them audible.
+`status.activeTransports` reports what is really running.
+
 ## Gestures: menu mode and graph mode
 
 A self-voicing interface with no buttons. Swipe between spoken actions, tap to

@@ -74,6 +74,17 @@ import {
 } from './phrasing.js';
 
 export interface EngineOptions {
+  /**
+   * Use the phone's vibration motor. **Off by default.**
+   *
+   * `navigator.vibrate()` is accepted and then silently ignored on a great many
+   * Android builds -- OEM skins, battery saver, Do Not Disturb -- and the API
+   * never reports that it did nothing. Rather than let the demo depend on a
+   * channel that cannot be verified, the audio-tactile buzz and the ring
+   * simulator carry the haptic meaning, and vibration is opt-in once a human
+   * has confirmed it works on the actual handset.
+   */
+  vibration?: boolean;
   /** Start with the audio-tactile buzz off (e.g. once on a real phone). */
   audioTactile?: boolean;
   /** Initial speech rate, 0.5-2.0. */
@@ -119,6 +130,8 @@ export class AudioHapticEngine {
       new AudioTactileTransport(this.sonifier),
     ]);
 
+    // Opt-in: see EngineOptions.vibration.
+    if (options.vibration !== true) this.haptics.setEnabled('vibration', false);
     if (options.audioTactile === false) this.haptics.setEnabled('audio-tactile', false);
     if (options.rate !== undefined) this.speech.setRate(options.rate);
 
