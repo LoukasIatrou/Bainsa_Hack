@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class XAxis(BaseModel):
@@ -49,6 +49,8 @@ class ExtractionResponse(BaseModel):
 class ReasonRequest(BaseModel):
     graph: GraphData  # confirmed/corrected by the user
     fieldConfidence: FieldConfidence | None = None
+    # height / width of the plot as drawn on screen, so ring angles match the drawn line
+    chartAspect: float | None = Field(default=None, gt=0, le=10)
 
 
 class Highlight(BaseModel):

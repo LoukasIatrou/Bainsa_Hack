@@ -26,7 +26,7 @@ from .schemas import (
 
 LOW_CONFIDENCE_THRESHOLD = 0.6  # same threshold as extraction._CONFIDENCE_THRESHOLD
 FLAT_FRACTION = 0.02  # moves smaller than 2% of the value range count as flat
-CHART_ASPECT = 0.6  # assumed chart height / width, for ring angles
+CHART_ASPECT = 0.6  # default plot height / width for ring angles when the frontend doesn't send one
 
 _SPOKEN_UNITS = {
     "°C": "degrees Celsius",
@@ -205,7 +205,13 @@ def is_low_confidence(graph: GraphData, field_confidence: FieldConfidence | None
 
 
 class Reasoner:
-    def __init__(self, graph: GraphData, field_confidence: FieldConfidence | None = None):
+    def __init__(
+        self,
+        graph: GraphData,
+        field_confidence: FieldConfidence | None = None,
+        chart_aspect: float | None = None,
+    ):
+        self.aspect = chart_aspect or CHART_ASPECT
         self.graph = graph
         self.x = graph.xAxis.values
         self.low_confidence = is_low_confidence(graph, field_confidence)
@@ -266,19 +272,6 @@ class Reasoner:
             return f"ends roughly where it started, at {self.sp.num(last)}, changing direction {times_word(len(s.turns))}"
         verb = "rises overall" if net == "up" else "falls overall"
         return f"{verb}, {span}, changing direction {times_word(len(s.turns))}"
-
-    def legs(self, s: SeriesFacts) -> str:
-        """Journey through the turning points, e.g. 'rises from 159 in 2011 to 161 in 2012, then falls ...'."""
-        stops = [s.points[0]] + [(i, s.values[i]) for i, _ in s.turns] + [s.points[-1]]
-        parts = []
-        for n, ((i0, v0), (i1, v1)) in enumerate(zip(stops, stops[1:])):
-            d = s.direction(v1 - v0)
-            verb = {"up": "rises", "down": "falls", "flat": "levels off"}[d]
-            start = f" from {self.sp.num(v0)} in {self.xl(i0)}" if n == 0 else ""
-            parts.append(f"{verb}{start} to {self.sp.num(v1)} in {self.xl(i1)}")
-        if len(parts) == 1:
-            return parts[0]
-        return ", ".join(parts[:-1]) + ", then " + parts[-1]
 
     # answers - kept to one short sentence each: audio is an add-on to the ring
 
@@ -590,7 +583,7 @@ class Reasoner:
     def trace(self, s: SeriesFacts) -> list[TraceSegment]:
         """Segments for a continuous sweep along the line, evenly spaced in time.
 
-        The angle is the slope as drawn on a chart CHART_ASPECT times as tall as it
+        The angle is the slope as drawn on a plot `aspect` times as tall as it
         is wide, with values scaled to the shared range, so it matches what a
         sighted reader sees: 0 = flat, +90 = straight up, -90 = straight down.
         """
@@ -607,7 +600,7 @@ class Reasoner:
                 direction = "unknown"
             else:
                 delta = v1 - v0
-                dy = 0.0 if self.span == 0 else delta / self.span * CHART_ASPECT
+                dy = 0.0 if self.span == 0 else delta / self.span * self.aspect
                 angle = round(math.degrees(math.atan2(dy, dx)), 1)
                 strength = round(self.strength(delta), 4)
                 direction = s.direction(delta)
@@ -624,9 +617,10 @@ def reason(
     graph: GraphData,
     field_confidence: FieldConfidence | None = None,
     overview_style: str | None = None,
+    chart_aspect: float | None = None,
 ) -> ReasoningResponse:
     style = overview_style or os.getenv("OVERVIEW_STYLE", "brief")
-    r = Reasoner(graph, field_confidence)
+    r = Reasoner(graph, field_confidence, chart_aspect)
     return ReasoningResponse(
         overview=r.overview(style),
         answers=Answers(

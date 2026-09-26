@@ -251,3 +251,15 @@ def test_endpoints():
     assert live.json()["phrasing"] == "template"
 
     assert client.get("/reason/mock?scenario=error").status_code == 400
+
+
+def test_chart_aspect_changes_ring_angles():
+    e = load("unemployment_us")
+    wide = reason(e.graph, chart_aspect=0.3).series[0].trace[3].angle
+    tall = reason(e.graph, chart_aspect=1.5).series[0].trace[3].angle
+    assert 0 < wide < tall < 90  # the 2020 spike looks steeper on a taller plot
+
+    client = TestClient(app)
+    body = {"graph": e.graph.model_dump(), "chartAspect": 1.5}
+    assert client.post("/reason", json=body).json()["series"][0]["trace"][3]["angle"] == tall
+    assert client.post("/reason", json={**body, "chartAspect": -1}).status_code == 422

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "ReasoningResponse",
-  "description": "Returned by Person 2's POST /reason (request: {graph: GraphData, fieldConfidence: FieldConfidence | null}). Everything the frontend needs in one call, so exploration and preset questions work with no further network requests. Call /reason again after any user correction.",
+  "description": "Returned by Person 2's POST /reason (request: {graph: GraphData, fieldConfidence: FieldConfidence | null, chartAspect: number | null}, where chartAspect is the drawn plot's height / width, default 0.6). Everything the frontend needs in one call, so exploration and preset questions work with no further network requests. Call /reason again after any user correction.",
   "type": "object",
   "required": [
     "overview",
@@ -246,7 +246,7 @@
                   ],
                   "minimum": -90,
                   "maximum": 90,
-                  "description": "Slope as drawn (chart assumed 0.6 as tall as wide): 0 = flat (point the ring right), +90 = straight up, -90 = straight down. null over an unreadable gap."
+                  "description": "Slope as drawn (on a plot chartAspect times as tall as wide): 0 = flat (point the ring right), +90 = straight up, -90 = straight down. null over an unreadable gap."
                 },
                 "strength": {
                   "type": [
