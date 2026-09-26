@@ -569,6 +569,7 @@ export class AudioHapticEngine {
     audioProducingSound: boolean;
     speechVoices: number;
     speechUsable: boolean;
+    speechVoice: string | null;
     vibrationApi: boolean;
     activeTransports: string[];
     problems: string[];
@@ -615,8 +616,9 @@ export class AudioHapticEngine {
     } else if (voices === 0) {
       problems.push(
         'SpeechSynthesis reports ZERO voices, so speech will be silent. '
-        + 'Electron shells and some Linux builds do this. Use Google Chrome, '
-        + 'or test on the phone.',
+        + 'Electron shells report zero always. On desktop Linux, Chrome needs '
+        + '--enable-speech-dispatcher; Firefox works without a flag. Android '
+        + 'Chrome is always fine.',
       );
     }
 
@@ -632,6 +634,7 @@ export class AudioHapticEngine {
       audioProducingSound: producing,
       speechVoices: voices,
       speechUsable: this.speech.usable,
+      speechVoice: this.speech.voiceName,
       vibrationApi,
       activeTransports: this.haptics.getActiveTransports(),
       problems,

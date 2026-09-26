@@ -91,6 +91,12 @@ export class SpeechQueue {
   private lastSpoken: QueueItem | null = null;
 
   private voice: SpeechSynthesisVoice | null = null;
+  /**
+   * Cached voice list. espeak-ng via speech-dispatcher exposes ~15,000 voices
+   * (every language crossed with every variant), so calling getVoices() on
+   * every status broadcast allocates a huge array many times a second.
+   */
+  private voices: SpeechSynthesisVoice[] = [];
   private rate = 1;
   private paused = false;
   /** Set while we are tearing down an utterance on purpose, so onend is ignored. */
@@ -123,7 +129,7 @@ export class SpeechQueue {
    * possible failure, so report it.
    */
   get voiceCount(): number {
-    return this.synth?.getVoices().length ?? 0;
+    return this.voices.length;
   }
 
   /** Supported *and* actually able to make a sound. */
@@ -155,10 +161,31 @@ export class SpeechQueue {
     if (!this.synth) return;
     const voices = this.synth.getVoices();
     if (voices.length === 0) return;
-    this.voice = voices.find((v) => v.lang.startsWith('en') && v.localService)
-      ?? voices.find((v) => v.lang.startsWith('en'))
-      ?? voices[0]
+    this.voices = voices;
+
+    const english = voices.filter((v) => v.lang.toLowerCase().startsWith('en'));
+    if (english.length === 0) {
+      this.voice = voices[0] ?? null;
+      return;
+    }
+
+    // espeak-ng names its variants "English+Adam", "English+Alex" and so on.
+    // Those are novelty timbres; the plain entry is the intelligible one, and
+    // picking by first-match would otherwise land on an arbitrary variant.
+    const plain = english.filter((v) => !v.name.includes('+'));
+    const pool = plain.length > 0 ? plain : english;
+
+    this.voice = pool.find((v) => v.default)
+      ?? pool.find((v) => v.lang.toLowerCase() === 'en-us')
+      ?? pool.find((v) => v.lang.toLowerCase() === 'en-gb')
+      ?? pool.find((v) => v.localService)
+      ?? pool[0]
       ?? null;
+  }
+
+  /** Which voice was chosen, for the diagnostic. */
+  get voiceName(): string | null {
+    return this.voice?.name ?? null;
   }
 
   /**

@@ -156,6 +156,7 @@ $('diagnose').addEventListener('click', async () => {
     `Audio unlocked        ${yn(r.audioUnlocked)}`,
     `Engine emitting sound ${yn(r.audioProducingSound)}   (signal level ${r.audioSignalLevel})`,
     `Speech voices         ${r.speechVoices}`,
+    `Voice chosen          ${r.speechVoice ?? '(none)'}`,
     `Speech will be heard  ${yn(r.speechUsable)}`,
     `Vibration API         ${yn(r.vibrationApi)}`,
     `Haptic channels       ${r.activeTransports.join(', ') || 'none'}`,
