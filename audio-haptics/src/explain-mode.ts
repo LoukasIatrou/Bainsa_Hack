@@ -20,8 +20,14 @@ import type { GraphData } from './types.js';
 export interface ExplainModeDeps {
   getGraph: () => GraphData | null;
   getPointCount: () => number;
-  /** Steer the finger at this point; arrival calls back into `onArrive`. */
-  setTarget: (index: number) => void;
+  /**
+   * Steer the finger at this point; arrival calls back into `onArrive`.
+   * `quietApproach` suppresses the per-point ticks on the way there, used when
+   * the target is behind the finger.
+   */
+  setTarget: (index: number, options?: { quietApproach?: boolean }) => void;
+  /** True when reaching `index` would mean dragging backwards over the curve. */
+  needsRestart: (index: number) => boolean;
   /** Stop steering entirely. */
   clearTarget: () => void;
   speak: (text: string, priority: 'interrupt' | 'normal') => void;
@@ -63,13 +69,16 @@ export class ExplainMode {
     this.explaining = false;
     this.awaitingArrival = true;
 
+    const goingBackwards = this.deps.needsRestart(this.index);
     this.deps.speak(
-      this.index === 0
-        ? 'Explain mode. Follow the vibration to the first point.'
-        : 'Follow the vibration to the next point.',
+      goingBackwards
+        ? 'Explain mode. Lift your finger and start again from the left edge of the graph.'
+        : this.index === 0
+          ? 'Explain mode. Follow the vibration to the first point.'
+          : 'Follow the vibration to the next point.',
       'interrupt',
     );
-    this.deps.setTarget(this.index);
+    this.deps.setTarget(this.index, { quietApproach: goingBackwards });
     this.deps.onChange();
   }
 
