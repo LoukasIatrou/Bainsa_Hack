@@ -1,7 +1,5 @@
 # Bainsa Hack — Graph Accessibility Copilot
 
-Six-hour accessibility hackathon project. Full team brief: [docs/team-plan.md](docs/team-plan.md).
-
 Point a phone camera at a line graph. The app reads it, speaks a summary, and lets a blind or
 low-vision user explore the data point by point through speech, sonification, and a vibrating
 "ring" — simulated with the phone's own vibration motor (`navigator.vibrate()`), since there is
