@@ -18,3 +18,6 @@ dist/
 
 # Claude Code session settings
 .claude/
+
+# Vite cache
+.vite/

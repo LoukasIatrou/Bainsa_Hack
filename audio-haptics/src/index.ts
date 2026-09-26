@@ -70,6 +70,7 @@ import {
   describeFieldsNeedingConfirmation,
   describeGraphIntro,
   describePoint,
+  describeShape,
   describeSonification,
 } from './phrasing.js';
 
@@ -631,7 +632,8 @@ export class AudioHapticEngine {
    *  - low_confidence: speaks the caveat and which fields to check, then the graph.
    *  - ok: speaks the intro and summary.
    */
-  handleExtraction(response: ExtractionResponse): void {
+  handleExtraction(response: ExtractionResponse, options: { announce?: boolean } = {}): void {
+    const announce = options.announce !== false;
     this.extractionStatus = response.status;
     const statusLine = describeExtractionStatus(response);
 
@@ -646,6 +648,13 @@ export class AudioHapticEngine {
     }
 
     this.setGraph(response.graph, response.fieldConfidence ?? null, { announce: false });
+    if (!announce) {
+      // Load quietly. Callers that fetch /reason first, then speak, get a
+      // better overview than the local fallback -- and the demo does not want
+      // the whole intro firing on the confirmation screen.
+      this.broadcastStatus();
+      return;
+    }
 
     if (statusLine) this.speech.speak(statusLine, 'interrupt');
     const confirm = describeFieldsNeedingConfirmation(response.fieldConfidence ?? null);
@@ -750,11 +759,7 @@ export class AudioHapticEngine {
     if (summary) {
       this.speech.speak(summary, 'normal');
     } else if (this.graph) {
-      this.speech.speak(
-        'No summary is available for this graph, so here is what was extracted.',
-        'normal',
-      );
-      this.speech.speak(describeSonification(this.graph), 'normal');
+      this.speech.speak(describeShape(this.graph), 'normal');
     }
   }
 
@@ -1057,6 +1062,7 @@ export {
   describePoint,
   describeAxes,
   describePointOfInterest,
+  describeShape,
   describeSonification,
   speakNumber,
   speakUnit,

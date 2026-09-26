@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+    <title>Graph Accessibility Copilot — demo</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0d1013; --panel: #161b21; --line: #2b333c;
+        --fg: #f2f6fa; --muted: #9aa7b4;
+        --accent: #6fd3ff; --ok: #7fe3a1; --warn: #ffc860; --bad: #ff8d7a;
+      }
+      * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+      html, body { margin: 0; height: 100%; }
+      body {
+        background: var(--bg); color: var(--fg);
+        font: 17px/1.5 system-ui, -apple-system, sans-serif;
+        display: flex; flex-direction: column; overscroll-behavior: none;
+      }
+      header {
+        padding: 10px 16px; border-bottom: 1px solid var(--line);
+        display: flex; align-items: center; gap: 10px;
+      }
+      header h1 { font-size: 0.95rem; margin: 0; font-weight: 600; flex: 1; }
+      .mode-pill {
+        font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase;
+        border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px;
+        color: var(--muted);
+      }
+      .mode-pill.live { color: var(--ok); border-color: var(--ok); }
+      main { flex: 1; overflow-y: auto; padding: 16px; }
+      .step { display: none; }
+      .step.active { display: block; }
+      h2 { font-size: 1.05rem; margin: 0 0 4px; }
+      p.sub { color: var(--muted); font-size: 0.88rem; margin: 0 0 18px; }
+      button {
+        font: inherit; font-weight: 600; width: 100%;
+        min-height: 60px; padding: 14px 18px; margin-bottom: 10px;
+        border-radius: 12px; border: 1px solid var(--line);
+        background: #222a32; color: var(--fg); cursor: pointer; text-align: left;
+      }
+      button:active { transform: scale(0.99); }
+      button.primary { background: #15455d; border-color: var(--accent); }
+      button.ghost { background: transparent; color: var(--muted); min-height: 48px; }
+      button:disabled { opacity: 0.4; }
+      button .k { display: block; font-size: 0.78rem; font-weight: 400; color: var(--muted); margin-top: 2px; }
+      .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .grid2 button { margin-bottom: 0; }
+      .card {
+        background: var(--panel); border: 1px solid var(--line);
+        border-radius: 12px; padding: 14px; margin-bottom: 14px;
+      }
+      dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; font-size: 0.92rem; }
+      dt { color: var(--muted); }
+      dd { margin: 0; }
+      .conf { display: flex; align-items: center; gap: 8px; }
+      .bar { flex: 1; height: 8px; background: #232a32; border-radius: 4px; overflow: hidden; }
+      .bar > i { display: block; height: 100%; background: var(--ok); }
+      .bar.low > i { background: var(--warn); }
+      #chart {
+        width: 100%; height: 46vh; min-height: 230px; touch-action: none;
+        background: #10161c; border: 1px solid var(--line); border-radius: 12px;
+        display: block;
+      }
+      #caption {
+        min-height: 3.2em; margin: 12px 0 10px; padding: 12px 14px;
+        background: var(--panel); border-left: 3px solid var(--accent);
+        border-radius: 0 10px 10px 0; font-size: 1rem;
+      }
+      #pulse {
+        font-size: 0.8rem; color: var(--muted); min-height: 1.4em; margin: 0 0 12px;
+      }
+      #pulse b { color: var(--accent); font-weight: 600; }
+      .banner {
+        padding: 10px 14px; border-radius: 10px; margin-bottom: 14px; font-size: 0.9rem;
+        border: 1px solid var(--warn); color: var(--warn); background: #241f12;
+      }
+      .banner.bad { border-color: var(--bad); color: var(--bad); background: #2a1715; }
+      .sr-only {
+        position: absolute; width: 1px; height: 1px; overflow: hidden;
+        clip: rect(0 0 0 0); white-space: nowrap;
+      }
+      footer { padding: 10px 16px; border-top: 1px solid var(--line); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1 id="title">Graph Accessibility Copilot</h1>
+      <span class="mode-pill" id="modePill">prototype</span>
+    </header>
+
+    <main>
+      <!-- Step 1-2: capture -->
+      <section class="step active" id="step-capture" aria-labelledby="h1c">
+        <h2 id="h1c">Capture the graph</h2>
+        <p class="sub">Photograph the graph, or load the known example.</p>
+        <button class="primary" id="btnCamera">
+          Take a photo
+          <span class="k">Uses the phone camera and the live extraction pipeline</span>
+        </button>
+        <input id="fileInput" type="file" accept="image/*" capture="environment" class="sr-only" />
+        <button id="btnUpload">
+          Upload an image
+          <span class="k">Pick a photo already on the device</span>
+        </button>
+        <button id="btnKnown">
+          Use the known graph
+          <span class="k">US unemployment 2016–2024, cached extraction</span>
+        </button>
+        <p class="sub" id="captureNote" style="margin-top:14px;"></p>
+      </section>
+
+      <!-- Step 3: confirmation -->
+      <section class="step" id="step-confirm" aria-labelledby="h2c">
+        <h2 id="h2c">Check what was read</h2>
+        <p class="sub">The system reports what it found, and how sure it is, before you trust it.</p>
+        <div id="confirmBanner"></div>
+        <div class="card">
+          <dl>
+            <dt>Type</dt><dd id="cType">—</dd>
+            <dt>Title</dt><dd id="cTitle">—</dd>
+            <dt>Horizontal</dt><dd id="cX">—</dd>
+            <dt>Vertical</dt><dd id="cY">—</dd>
+            <dt>Points</dt><dd id="cPoints">—</dd>
+          </dl>
+        </div>
+        <div class="card" id="confCard">
+          <dl id="confList"></dl>
+        </div>
+        <button class="primary" id="btnConfirm">That looks right — explore it</button>
+        <button class="ghost" id="btnRetake">Retake the photo</button>
+      </section>
+
+      <!-- Steps 4-7: explore -->
+      <section class="step" id="step-explore" aria-labelledby="h3c">
+        <h2 id="h3c" class="sr-only">Explore the graph</h2>
+        <svg id="chart" viewBox="0 0 400 260"
+             role="img" aria-label="Graph. Drag a finger across to follow the curve.">
+          <polyline id="curve" fill="none" stroke="var(--accent)" stroke-width="3" points="" />
+          <circle id="target" r="9" fill="none" stroke="var(--warn)" stroke-width="3" cx="-30" cy="-30" />
+          <circle id="finger" r="7" fill="var(--fg)" cx="-30" cy="-30" />
+        </svg>
+        <p id="pulse"></p>
+        <p id="caption" role="status" aria-live="polite">—</p>
+
+        <button class="primary" id="btnOverview">Overview</button>
+        <div class="grid2" style="margin-bottom:10px;">
+          <button id="btnNext">Next point</button>
+          <button id="btnExplain">Explain</button>
+        </div>
+        <button id="btnMax">Where is the maximum?</button>
+        <button class="ghost" id="btnStop">Stop speaking</button>
+        <button class="ghost" id="btnReset">Start over</button>
+      </section>
+    </main>
+
+    <footer>
+      <p class="sub" id="status" style="margin:0; font-size:0.78rem;">Ready.</p>
+    </footer>
+
+    <script type="module" src="/demo/demo.ts"></script>
+  </body>
+</html>
