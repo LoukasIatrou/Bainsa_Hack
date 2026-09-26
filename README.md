@@ -1,23 +1,21 @@
 # Bainsa Hack — Graph Accessibility Copilot
 
-Six-hour accessibility hackathon project. Full team brief: [docs/team-plan.md](docs/team-plan.md).
-
 Point a phone camera at a line graph. The app reads it, speaks a summary, and lets a blind or
-low-vision user explore the data point by point through speech, sonification, and a vibrating
-"ring" — simulated with the phone's own vibration motor (`navigator.vibrate()`), since there is
-no physical ring in this build. Speech uses the browser's built-in `SpeechSynthesis`.
+low-vision user explore the data point by point through speech, sonification, and a haptic
+"ring" — simulated in this build rather than physical hardware. Speech uses the browser's
+built-in `SpeechSynthesis`.
 
 Scope: **line graphs only**. Other chart types are future scope.
 
 ## Layout
 
-| Path | Owner | What it is |
-| --- | --- | --- |
-| `contracts/` | shared | JSON schemas every workstream conforms to (`GraphData`, `ExtractionResponse`, `ReasoningResponse`) plus [`haptic-patterns.md`](contracts/haptic-patterns.md), the single source of truth for what each vibration pattern means. |
-| `backend/` | Person 1 & 2 | FastAPI service. `POST /extract` (vision) and `POST /reason` (reasoning). |
-| `frontend/` | Person 4 | React + TypeScript + Vite app — the actual demo. |
-| `audio-haptics/` | Person 3 | `@bainsa/audio-haptics` — speech, sonification and haptic engine. Imported by the frontend directly from source (no build step, zero runtime dependencies). Also ships its own standalone test harness. |
-| `docs/` | all | Team brief, design notes, demo runbooks, capture examples, and the [pitch deck](docs/pitch-deck/index.html). |
+| Path | What it is |
+| --- | --- |
+| `contracts/` | JSON schemas every workstream conforms to (`GraphData`, `ExtractionResponse`, `ReasoningResponse`) plus [`haptic-patterns.md`](contracts/haptic-patterns.md), the single source of truth for what each haptic pattern means. |
+| `backend/` | FastAPI service. `POST /extract` (vision) and `POST /reason` (reasoning). |
+| `frontend/` | React + TypeScript + Vite app — the actual demo. |
+| `audio-haptics/` | `@bainsa/audio-haptics` — speech, sonification and haptic engine. Imported by the frontend directly from source (no build step, zero runtime dependencies). Also ships its own standalone test harness. |
+| `docs/` | Team brief, design notes, demo runbooks, capture examples, and the [pitch deck](docs/pitch-deck/index.html). |
 
 ## Requirements
 
@@ -51,7 +49,7 @@ npx -y pnpm@10 install
 npx -y pnpm@10 dev          # http://127.0.0.1:5173
 ```
 
-The frontend imports Person 3's engine straight from `../audio-haptics/src` (see
+The frontend imports the audio-haptics engine straight from `../audio-haptics/src` (see
 `frontend/src/engine/index.ts` and the `fs.allow` entry in `frontend/vite.config.ts`) — there is
 no separate install or build step for `audio-haptics/` unless you're running its own harness
 below.
@@ -88,8 +86,7 @@ Two supported paths, both documented in [`frontend/README.md`](frontend/README.m
 
 ## Optional: audio-haptics standalone harness
 
-For testing speech, sonification, and haptics in isolation (used by Person 3; not required to run
-the main demo):
+For testing speech, sonification, and haptics in isolation (not required to run the main demo):
 
 ```sh
 cd audio-haptics
@@ -118,22 +115,19 @@ cd audio-haptics && npm run typecheck && npm test
 
 ## API surface
 
-| Endpoint | Owner | Purpose |
-| --- | --- | --- |
-| `GET /health` | — | Liveness check. |
-| `POST /extract` | Person 1 | Multipart image upload → `ExtractionResponse` via Gemini, forced to `contracts/graph-data.schema.json`. Falls back across Gemini models if one is overloaded. |
-| `GET /extract/mock?scenario=…` | Person 1 | Fixture data (`ok`, `low_confidence`, `error`, `unemployment_us`, `mobile_italy_japan`) from `backend/fixtures/`. |
-| `POST /reason` | Person 2 | Confirmed `GraphData` → overview text, ring `trace`, landmark stops, per-point readouts/explanations, and four preset answers (trend, max, changes, compare) — everything the Explore page needs in one call. |
-| `GET /reason/mock?scenario=…` | Person 2 | `/reason` run against a fixture, for building against before extraction is wired up. |
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /health` | Liveness check. |
+| `POST /extract` | Multipart image upload → `ExtractionResponse` via Gemini, forced to `contracts/graph-data.schema.json`. Falls back across Gemini models if one is overloaded. |
+| `GET /extract/mock?scenario=…` | Fixture data (`ok`, `low_confidence`, `error`, `unemployment_us`, `mobile_italy_japan`) from `backend/fixtures/`. |
+| `POST /reason` | Confirmed `GraphData` → overview text, ring `trace`, landmark stops, per-point readouts/explanations, and four preset answers (trend, max, changes, compare) — everything the Explore page needs in one call. |
+| `GET /reason/mock?scenario=…` | `/reason` run against a fixture, for building against before extraction is wired up. |
 
 Full field-by-field detail: [`backend/README.md`](backend/README.md). Haptic pattern timings and
 meanings: [`contracts/haptic-patterns.md`](contracts/haptic-patterns.md).
 
 ## Honesty and scope
 
-- Vibration is **off by default** — `navigator.vibrate()` is silently ignored on many Android
-  builds and desktop browsers with no way to detect that, so the demo never claims the phone is
-  buzzing unless it's opted in and on an actual phone.
 - Uncertainty is surfaced, never hidden: low-confidence fields are flagged and unreadable values
   stay `null` rather than being guessed.
 - Three execution modes exist for the demo — live capture, a known/uploaded graph, and a cached
