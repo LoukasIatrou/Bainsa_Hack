@@ -13,6 +13,32 @@ function stopWalk(): void {
   engine.stopExplainMode()
 }
 
+// Person 3's model for targets behind the finger (commit aa2fb50): instead of dragging back over
+// the curve (narrating every point in reverse), the user lifts off and starts again from the left
+// edge; the approach is quiet until the target is reached. The Explore page resets its ring to
+// point at the start again and holds point explanations until the target (see onRestart).
+type RestartListener = (target: number) => void
+const restartListeners = new Set<RestartListener>()
+
+export function onRestart(listener: RestartListener): () => void {
+  restartListeners.add(listener)
+  return () => {
+    restartListeners.delete(listener)
+  }
+}
+
+// Steer to `index`. Forward: speak `forward` (if any). Behind by more than two points: quiet
+// approach, restart from the left edge. `priority` 'normal' queues the hint after an answer.
+function steer(index: number, forward: string | null, priority: 'interrupt' | 'normal'): void {
+  const back = engine.guidance.needsRestart(index)
+  // Start guidance BEFORE speaking: the engine re-broadcasts its status (new target) on speech.
+  engine.guidance.start(index, { quietApproach: back })
+  if (back) {
+    restartListeners.forEach((listener) => listener(index))
+    engine.speech.speak('Lift your finger and start again from the left edge of the graph.', priority)
+  } else if (forward) engine.speech.speak(forward, priority)
+}
+
 // Person 2's explanation for a point of the current line ('2020, 8.1 percent. The highest point,
 // up 4.4 percentage points from 2019; after this it falls.'), or Person 3's own wording without
 // /reason. The engine's reasoning object is the /reason JSON; its type just omits `explain`.
@@ -37,7 +63,7 @@ export function toggleMenu(): void {
 }
 
 // Next point, looping: Person 2's landmark stops (start, lows, peaks, max, min, end) in order;
-// after the last one it goes back to the first. His nextPoint() stops at the end instead.
+// after the last one it goes back to the first (via Person 3's restart-from-the-left model).
 export function runNext(): void {
   const graph = engine.getGraph()
   if (!graph) return
@@ -50,16 +76,10 @@ export function runNext(): void {
   stops = [...new Set(stops)].sort((a, b) => a - b)
   if (!stops.length) return
   const from = engine.guidance.getCurrentIndex() ?? engine.guidance.getTarget() ?? engine.explore.currentPoint
-  const after = stops.find((i) => i > from)
-  const next = after ?? stops[0]
+  const next = stops.find((i) => i > from) ?? stops[0]
   stopWalk()
   engine.setMode('graph')
-  // Start guidance BEFORE speaking: the engine re-broadcasts its status (new target) on speech.
-  engine.guidance.start(next)
-  engine.speech.speak(
-    after === undefined ? 'Back to the start. Follow the vibration.' : 'Follow the vibration to the next point.',
-    'interrupt',
-  )
+  steer(next, 'Follow the vibration to the next point.', 'interrupt')
 }
 
 export function runOverview(): void {
@@ -120,11 +140,11 @@ export function runMin(): void {
   guideTo(index)
 }
 
-// Mark the point silently (one 'double' pulse) and steer the finger to it. Callers have already
-// switched to graph mode.
+// Mark the point silently (one 'double' pulse) and steer the finger to it, after the answer that
+// was just spoken. Callers have already switched to graph mode.
 function guideTo(index: number): void {
   engine.explore.focus(index, { announce: false, pattern: 'double' })
-  engine.guidance.start(index)
+  steer(index, null, 'normal')
 }
 
 export function installMenu(onStartOver: () => void): void {

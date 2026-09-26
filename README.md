@@ -56,7 +56,7 @@ below.
 
 Open `http://127.0.0.1:5173`:
 
-- `/` — capture a photo (or upload one), confirm what was extracted, then explore it.
+- `/` — capture a photo (or upload one); it goes straight to the graph to explore (a failed extraction offers a retake).
 - `#saved` — skip capture: loads a bundled US-unemployment graph straight into the explorer, no
   camera or backend needed.
 - `#slider` — the earlier slider-based exploration page.

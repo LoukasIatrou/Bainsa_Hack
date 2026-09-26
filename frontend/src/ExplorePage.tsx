@@ -3,7 +3,7 @@ import { engine, fromPointerEvent, normalise, pointCount, valueRange } from './e
 import type { EngineStatus } from './engine'
 import type { PlotBox } from './engine/curve'
 import { lineRuns, runsCurve, runsPath } from './engine/line'
-import { explainPoint, installMenu, installWalkGuard, toggleMenu } from './engine/menu'
+import { explainPoint, installMenu, installWalkGuard, onRestart, toggleMenu } from './engine/menu'
 import { EngineRing } from './spiderSense/EngineRing'
 import { INITIAL_STATE, stepSpiderSense } from './spiderSense/logic'
 import type { Curve, Point, SpiderSenseState } from './spiderSense/logic'
@@ -59,6 +59,8 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
   })
   const senseRef = useRef(senseState)
   const stepRef = useRef<(p: Point | null) => void>(() => {})
+  // Set while heading back to a target behind the finger: points on the way are not explained.
+  const quietTarget = useRef<number | null>(null)
   // Mouse clicks pick a menu item directly; touch goes through Person 3's gestures instead.
   const lastPointerType = useRef<string>('')
 
@@ -73,9 +75,17 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
       else if (event.type === 'focus:change') setSeriesIndex(event.series)
     })
     const offGuard = installWalkGuard()
+    // Target behind the finger: start again from the left edge - the ring points to the start
+    // again, and nothing is explained until the target is reached.
+    const offRestart = onRestart((target) => {
+      quietTarget.current = target
+      senseRef.current = { curve: senseRef.current.curve, s: INITIAL_STATE, current: null }
+      setSenseState(senseRef.current)
+    })
     return () => {
       off()
       offGuard()
+      offRestart()
       engine.stopAll()
     }
   }, [])
@@ -331,7 +341,10 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
         })
         if (best >= 0 && bestD <= reach && best !== current) {
           current = best
-          explainPoint(best)
+          if (quietTarget.current === null || best === quietTarget.current) {
+            quietTarget.current = null
+            explainPoint(best)
+          }
         }
       }
       senseRef.current = { curve, s: next, current }
