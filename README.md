@@ -5,6 +5,8 @@ Six-hour accessibility hackathon project. Full team brief: [docs/team-plan.md](d
 Phone demo (not a physical ring): haptics use the phone's own vibration motor
 (`navigator.vibrate()`), speech uses the browser's built-in `SpeechSynthesis`.
 
+Scope for now: **line graphs only**. Other chart types are future scope.
+
 ## Layout
 
 - `contracts/` - shared JSON schemas every workstream conforms to (`GraphData`, `ExtractionResponse`).

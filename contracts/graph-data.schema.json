@@ -5,7 +5,11 @@
   "type": "object",
   "required": ["graphType", "title", "xAxis", "yAxis", "series", "confidence"],
   "properties": {
-    "graphType": { "type": "string", "enum": ["line", "bar", "scatter", "pie"] },
+    "graphType": {
+      "type": "string",
+      "enum": ["line"],
+      "description": "Scoped to line graphs only for now. Other types are future scope, not a rejection of the field."
+    },
     "title": { "type": "string" },
     "xAxis": {
       "type": "object",

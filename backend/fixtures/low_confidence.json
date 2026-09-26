@@ -1,7 +1,7 @@
 {
   "status": "low_confidence",
   "graph": {
-    "graphType": "bar",
+    "graphType": "line",
     "title": "Quarterly Revenue",
     "xAxis": {
       "label": "Quarter",
@@ -27,5 +27,5 @@
     "yAxis": 0.4,
     "series": 0.5
   },
-  "message": "Y-axis unit is cropped from the image and the Q3 bar is partially obscured."
+  "message": "Y-axis unit is cropped from the image and the Q3 point is partially obscured."
 }

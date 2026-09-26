@@ -19,7 +19,7 @@ class Series(BaseModel):
 
 
 class GraphData(BaseModel):
-    graphType: Literal["line", "bar", "scatter", "pie"]
+    graphType: Literal["line"]  # scoped to line graphs for now
     title: str
     xAxis: XAxis
     yAxis: YAxis

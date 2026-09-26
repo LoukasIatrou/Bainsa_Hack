@@ -8,9 +8,12 @@ from .schemas import ExtractionResponse, FieldConfidence, GraphData
 _MODEL = "gemini-2.5-flash"
 _CONFIDENCE_THRESHOLD = 0.6
 
-_PROMPT = """You are extracting structured data from an image of a chart/graph for a blind or low-vision user.
+_PROMPT = """You are extracting structured data from an image of a LINE GRAPH for a blind or low-vision user.
+This prototype only supports line graphs. First decide whether the image is actually a line graph.
+
 Read the chart carefully and return:
-- graphType: one of line, bar, scatter, pie (best match)
+- isLineGraph: true only if the image is a line graph. False for bar charts, pie charts, scatter plots, tables, or anything else.
+- graphType: always "line" (required by the schema; ignore this field's value if isLineGraph is false).
 - title: the chart's title, or a short factual description if untitled
 - xAxis: label and the list of category/tick values
 - yAxis: label and unit if shown
@@ -25,6 +28,7 @@ Never invent values you cannot read. Use null and lower confidence instead of gu
 
 
 class _ModelOutput(GraphData):
+    isLineGraph: bool
     fieldConfidence: FieldConfidence
     message: str | None = None
 
@@ -53,7 +57,14 @@ def extract_graph(image_bytes: bytes, mime_type: str) -> ExtractionResponse:
         return ExtractionResponse(status="error", message="Model returned no data.")
 
     parsed = _ModelOutput.model_validate_json(response.text)
-    graph = GraphData(**parsed.model_dump(exclude={"fieldConfidence", "message"}))
+
+    if not parsed.isLineGraph:
+        return ExtractionResponse(
+            status="error",
+            message=parsed.message or "This doesn't look like a line graph. Please retake or upload a line graph.",
+        )
+
+    graph = GraphData(**parsed.model_dump(exclude={"isLineGraph", "fieldConfidence", "message"}))
     status = "ok" if graph.confidence >= _CONFIDENCE_THRESHOLD else "low_confidence"
 
     return ExtractionResponse(
