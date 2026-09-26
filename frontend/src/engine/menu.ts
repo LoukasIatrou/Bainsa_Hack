@@ -1,33 +1,23 @@
-// Person 4's menu for Person 3's engine: his default items, reordered the same, plus
-// front-end workarounds for engine behaviours we may not patch in audio-haptics/:
+// Person 4's menu for Person 3's engine (menu mode: swipe to move, tap to choose; two-finger tap,
+// right-click or M switches back to the graph). Items follow the demo walkthrough. Every action
+// that points at the graph switches to graph mode, so the ring can guide the finger there.
+//
+// Front-end workarounds for engine behaviours we may not patch in audio-haptics/:
 //  - Overview stops a running Explain walk first, and speaks /reason's overview caveats.
-//  - Stop ends the walk as well as speech (his stopSpeaking emits no speech:idle, so a walk
-//    left running would stall).
-//  - Two-finger tap back to the menu ends the walk (see installWalkGuard); "Continue from next
-//    point" then resumes it one point on, which doubles as "skip".
+//  - His ask() cuts its own answer off (see runAsk).
+//  - Returning to the menu mid-walk ends the walk (installWalkGuard).
 import { engine } from './index'
 import type { MenuItem } from './index'
 
-let pausedAt: number | null = null
-
 function stopWalk(): void {
-  const step = engine.getStatus().explainStep
-  if (engine.getStatus().explaining && step !== null) pausedAt = step - 1
   engine.stopExplainMode()
 }
 
-// Shared by the menu and the demo buttons, so both get the same walk workarounds.
 export function runOverview(): void {
-  engine.stopExplainMode()
-  pausedAt = null
+  stopWalk()
   engine.setMode('graph')
   engine.startOverview()
   for (const caveat of engine.getReasoning()?.overview.caveats ?? []) engine.speech.speak(caveat, 'normal')
-}
-
-export function runStop(): void {
-  stopWalk()
-  engine.stopSpeaking()
 }
 
 // Preset question. His ask() speaks the answer with 'interrupt' and then focuses the point,
@@ -40,70 +30,89 @@ export function runAsk(question: 'max'): void {
     engine.ask(question)
     return
   }
+  // Switch mode BEFORE speaking: the engine announces "Graph mode..." with 'interrupt', which
+  // would otherwise cut the answer off.
+  engine.setMode('graph')
   engine.speech.speak(answer.answer, 'interrupt')
   for (const caveat of answer.caveats) engine.speech.speak(caveat, 'normal')
   const first = answer.highlight[0]
   if (first) {
     const seriesIndex = graph.series.findIndex((s) => s.name === first.series)
     if (seriesIndex >= 0) engine.explore.selectSeries(seriesIndex, { announce: false })
-    engine.explore.focus(first.index, { announce: false, pattern: 'double' })
-    // Then steer the finger to the evidence, like Next point does.
-    engine.setMode('graph')
-    engine.guidance.start(first.index)
+    guideTo(first.index)
   }
 }
 
-export function installMenu(): void {
-  pausedAt = null
+// /reason has no "minimum" preset answer, so find the lowest readable value of the current line
+// and speak Person 2's explanation for that point (fallback: a plain sentence).
+export function runMin(): void {
+  const graph = engine.getGraph()
+  if (!graph) return
+  const series = graph.series[engine.explore.currentSeries] ?? graph.series[0]
+  let index = -1
+  series.values.forEach((v, i) => {
+    if (v !== null && (index < 0 || v < (series.values[index] as number))) index = i
+  })
+  if (index < 0) {
+    engine.speech.speak('No values could be read.', 'interrupt')
+    return
+  }
+  // The engine's reasoning object is Person 2's /reason JSON; its type just omits `explain`.
+  const reasoning = engine.getReasoning() as unknown as {
+    series?: { name: string; points: { index: number; explain?: string }[] }[]
+  } | null
+  const explain = reasoning?.series?.find((s) => s.name === series.name)?.points.find((p) => p.index === index)?.explain
+  const unit = graph.yAxis.unit ? ` ${graph.yAxis.unit}` : ''
+  engine.setMode('graph') // before speaking, see runAsk
+  engine.speech.speak(
+    explain ? `Lowest point. ${explain}` : `Lowest: ${series.values[index]}${unit}, at ${graph.xAxis.values[index]}.`,
+    'interrupt',
+  )
+  guideTo(index)
+}
+
+// Mark the point silently (one 'double' pulse) and steer the finger to it. Callers have already
+// switched to graph mode.
+function guideTo(index: number): void {
+  engine.explore.focus(index, { announce: false, pattern: 'double' })
+  engine.guidance.start(index)
+}
+
+export function installMenu(onStartOver: () => void): void {
+  const hasGraph = () => engine.getGraph() !== null
   const items: MenuItem[] = [
+    { id: 'overview', label: 'Overview', hint: 'Axes and the shape of the graph.', available: hasGraph, activate: runOverview },
     {
-      id: 'overview',
-      label: 'Overview',
-      hint: 'Hear the shape of the whole graph.',
-      available: () => engine.getGraph() !== null,
-      activate: runOverview,
+      id: 'next',
+      label: 'Next point',
+      hint: 'Guides you to the next peak or low.',
+      available: hasGraph,
+      activate: () => {
+        stopWalk()
+        engine.setMode('graph')
+        engine.nextPoint()
+      },
     },
     {
       id: 'explain',
-      label: 'Explain each point',
-      hint: 'Guided walk through every point.',
-      available: () => engine.getGraph() !== null && engine.getGraphKind() === 'discrete',
+      label: 'Explain',
+      hint: 'Describes the point you are on.',
+      available: hasGraph,
       activate: () => {
-        pausedAt = null
         engine.setMode('graph')
-        engine.startExplainMode()
+        engine.explain()
       },
     },
+    { id: 'max', label: 'Maximum', hint: 'Where is the highest value?', available: hasGraph, activate: () => runAsk('max') },
+    { id: 'min', label: 'Minimum', hint: 'Where is the lowest value?', available: hasGraph, activate: runMin },
     {
-      id: 'continue',
-      label: 'Continue from next point',
-      hint: 'Resume the walk one point on.',
-      available: () => pausedAt !== null && engine.getGraphKind() === 'discrete',
+      id: 'start-over',
+      label: 'Start over',
+      hint: 'Back to the camera.',
       activate: () => {
-        const from = (pausedAt ?? -1) + 1
-        pausedAt = null
-        engine.setMode('graph')
-        engine.startExplainMode(from)
+        engine.stopAll()
+        onStartOver()
       },
-    },
-    {
-      id: 'graph',
-      label: 'Explore freely',
-      hint: 'Trace the curve with a finger.',
-      available: () => engine.getGraph() !== null,
-      activate: () => engine.setMode('graph'),
-    },
-    { id: 'repeat', label: 'Repeat that', activate: () => engine.replay() },
-    {
-      id: 'series',
-      label: 'Switch series',
-      available: () => (engine.getGraph()?.series.length ?? 0) > 1,
-      activate: () => engine.explore.nextSeries(),
-    },
-    {
-      id: 'stop',
-      label: 'Stop speaking',
-      activate: runStop,
     },
   ]
   engine.menu.setItems(items)

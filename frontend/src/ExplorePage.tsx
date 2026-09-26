@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { engine, fromPointerEvent, normalise, pointCount, valueRange } from './engine'
-import type { EngineStatus, GuidanceReading, HapticPatternName } from './engine'
-import { installMenu, installWalkGuard, runAsk, runOverview, runStop } from './engine/menu'
+import type { EngineStatus } from './engine'
 import type { PlotBox } from './engine/curve'
-import { runsCurve, runsPath, smoothRuns } from './engine/smooth'
+import { lineRuns, runsCurve, runsPath } from './engine/line'
+import { installMenu, installWalkGuard } from './engine/menu'
 import { EngineRing } from './spiderSense/EngineRing'
 import { INITIAL_STATE, stepSpiderSense } from './spiderSense/logic'
 import type { Curve, Point, SpiderSenseState } from './spiderSense/logic'
@@ -25,54 +25,37 @@ interface ExplorePageProps {
   onSliderMode: () => void
 }
 
-// Plot inner box padding inside the framed panel (room for the faint labels).
-// Top/bottom room so the ring isn't cut off at the highest and lowest points.
+// Plot inner box padding inside the framed panel: room for the faint labels, and top/bottom room
+// so the ring isn't cut off at the highest and lowest points.
 const PAD = { left: 38, right: 24, top: 36, bottom: 34 }
 // Honest labels (Person 3's runbook): say whether this is a live photo or the known graph.
 const SOURCE_LABEL: Record<GraphSource, string> = { live: 'live capture', controlled: 'uploaded image', saved: 'cached extraction' }
-const MENU_HINTS = 'swipe → ↓ next · swipe ← ↑ previous · tap: choose · long press: repeat · 2-finger tap: graph'
-const GRAPH_HINTS = 'move / drag: follow the ring from the start · tap: read point · long press: explain point · 2-finger tap: menu'
 
-interface Finger {
-  // Normalised data space: x 0..1 across the plot inner box, y 0..1 bottom to top.
-  x: number
-  y: number
-}
-
-function fmt(value: number | null | undefined, unit: string | null | undefined): string {
-  if (value === null || value === undefined) return 'unreadable'
-  return unit ? `${value} ${unit}` : String(value)
-}
-
-// The Explore screen: one framed graph panel, no buttons. Input goes to Person 3's engine
-// (engine.gestures: menu mode / graph mode, two-finger tap toggles); every sound and buzz comes
-// from the engine. This component only draws: the line, and the spider-sense ring from the
-// engine's guidance reading and status.
+// The Explore screen. Graph mode: the framed graph; the pointer (mouse or finger) is the simulated
+// ring, which first points to the START of the line, then along it to the end. Menu mode: a full
+// screen list of actions (Person 3's menu: swipe to move, tap to choose). Two-finger tap, a
+// right-click or the M key switches modes. Every sound and buzz comes from Person 3's engine.
 export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning, source, onReset, onSliderMode }: ExplorePageProps) {
+  const bodyRef = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const plotRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState<{ w: number; h: number } | null>(null)
   const [status, setStatus] = useState<EngineStatus>(() => engine.getStatus())
   const modeRef = useRef(status.mode)
   const [seriesIndex, setSeriesIndex] = useState(0)
-  const [finger, setFinger] = useState<Finger | null>(null)
-  const [reading, setReading] = useState<GuidanceReading | null>(null)
   const [lastSpoken, setLastSpoken] = useState('')
-  const [lastPattern, setLastPattern] = useState<HapticPatternName | null>(null)
-  const [lastMeaning, setLastMeaning] = useState('')
-  const [hasReasoning, setHasReasoning] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
-  // The ring follows the pointer (mouse hover or finger) and always shows the way along the line.
+  const [loaded, setLoaded] = useState(false)
+  const started = useRef(false)
   // Tagged with the curve it was computed on: a new curve (resize, series switch) starts over.
   const [senseState, setSenseState] = useState<{ curve: Curve | null; s: SpiderSenseState }>({
     curve: null,
     s: INITIAL_STATE,
   })
   const senseRef = useRef(senseState)
-  const pointerRef = useRef<Point | null>(null)
   const stepRef = useRef<(p: Point | null) => void>(() => {})
-  const [loaded, setLoaded] = useState(false)
-  const started = useRef(false)
+  // Mouse clicks pick a menu item directly; touch goes through Person 3's gestures instead.
+  const lastPointerType = useRef<string>('')
 
   // --- engine events --------------------------------------------------------
   useEffect(() => {
@@ -81,15 +64,7 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
         modeRef.current = event.status.mode
         setStatus(event.status)
         setSeriesIndex(engine.explore.currentSeries)
-        if (event.status.mode === 'menu') {
-          setFinger(null)
-          setReading(null)
-        }
       } else if (event.type === 'speech:caption') setLastSpoken(event.text)
-      else if (event.type === 'haptic:pattern') {
-        setLastPattern(event.pattern)
-        setLastMeaning(event.meaning)
-      }
       else if (event.type === 'focus:change') setSeriesIndex(event.series)
     })
     const offGuard = installWalkGuard()
@@ -134,8 +109,7 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
     if (!box || started.current) return
     started.current = true
     engine.setGraph(graph, fieldConfidence, { announce: false })
-    installMenu()
-    engine.setMode('menu')
+    installMenu(onReset)
     const intro = (notice: string) => {
       // Straight into the graph: the ring points to the start of the line, then along it.
       engine.setMode('graph')
@@ -157,80 +131,103 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
       fetchReasoning(box.height / box.width)
         .then((r) => {
           engine.setReasoning(toEngine(r))
-          setHasReasoning(true)
           intro('')
         })
         .catch(() => intro('Reasoning unavailable. '))
     } else {
       intro('Reasoning unavailable. ')
     }
-  }, [box, graph, fieldConfidence, reasoning, fetchReasoning, source])
+  }, [box, graph, fieldConfidence, reasoning, fetchReasoning, source, onReset])
 
-  // --- pointer input -> engine.gestures --------------------------------------
+  // --- pointer input -----------------------------------------------------------
   useEffect(() => {
-    const el = panelRef.current
+    const el = bodyRef.current
     if (!el) return
     // Padding-corrected: normalised against the inner plot element, y up.
-    const toData = (clientX: number, clientY: number): Finger | null =>
+    const toData = (clientX: number, clientY: number) =>
       plotRef.current ? fromPointerEvent({ clientX, clientY }, plotRef.current) : null
     engine.setPointerConverter(toData)
     let active: number | null = null
-    // Drawing only: the engine does the guidance itself from its drag gesture.
+    const inMenu = () => modeRef.current === 'menu'
+    // Ring drawing (graph mode only); the engine does its own guidance from the drag gesture.
     const draw = (e: PointerEvent) => {
-      const r = el.getBoundingClientRect()
+      if (inMenu() || !panelRef.current) return
+      const r = panelRef.current.getBoundingClientRect()
       stepRef.current({ x: e.clientX - r.left, y: e.clientY - r.top })
-      if (modeRef.current !== 'graph') return
-      const f = toData(e.clientX, e.clientY)
-      setFinger(f)
-      setReading(f ? engine.guidance.read(f.x, f.y) : null)
     }
+    // A mouse in menu mode clicks items directly (see onClick below), so it skips the gestures.
+    const toGestures = (e: PointerEvent) => !(e.pointerType === 'mouse' && inMenu())
     const down = (e: PointerEvent) => {
-      el.setPointerCapture?.(e.pointerId)
-      engine.gestures.pointerDown(e)
+      lastPointerType.current = e.pointerType
+      if (e.button === 2) return // right-click toggles modes (contextmenu handler)
+      // No capture for a mouse in the menu: capture would retarget the click away from the item.
+      if (toGestures(e)) {
+        try {
+          el.setPointerCapture?.(e.pointerId)
+        } catch {
+          // capture is a convenience; the gesture is the point
+        }
+      }
+      if (toGestures(e)) engine.gestures.pointerDown(e)
       if (active === null) {
         active = e.pointerId
         draw(e)
-      } else {
-        // A second finger is a command (two-finger tap), not tracing.
-        setFinger(null)
       }
     }
     const move = (e: PointerEvent) => {
-      engine.gestures.pointerMove(e)
+      if (toGestures(e)) engine.gestures.pointerMove(e)
       // A mouse is the simulated ring: it steers on hover too, no button needed. Like Person 3's
       // demo page, hover also feeds engine.guide so the buzz and readouts follow the mouse.
       if (e.pointerId === active) draw(e)
-      else if (active === null && e.pointerType === 'mouse') {
+      else if (active === null && e.pointerType === 'mouse' && !inMenu()) {
         draw(e)
         const f = toData(e.clientX, e.clientY)
-        if (f && modeRef.current === 'graph') engine.guide(f.x, f.y)
+        if (f) engine.guide(f.x, f.y)
       }
     }
     const end = (e: PointerEvent, cancel: boolean) => {
-      if (cancel) engine.gestures.pointerCancel(e)
-      else engine.gestures.pointerUp(e)
-      if (e.pointerId === active) {
-        active = null
-        // Lifting keeps the ring where it was, so it is always visible.
-        if (e.pointerType !== 'mouse') {
-          setFinger(null)
-          setReading(null)
-        }
+      if (toGestures(e) && e.button !== 2) {
+        if (cancel) engine.gestures.pointerCancel(e)
+        else engine.gestures.pointerUp(e)
       }
+      if (e.pointerId === active) active = null
     }
     const up = (e: PointerEvent) => end(e, false)
     const cancel = (e: PointerEvent) => end(e, true)
+    const context = (e: MouseEvent) => {
+      e.preventDefault()
+      engine.menu.toggleMode()
+    }
     el.addEventListener('pointerdown', down)
     el.addEventListener('pointermove', move)
     el.addEventListener('pointerup', up)
     el.addEventListener('pointercancel', cancel)
+    el.addEventListener('contextmenu', context)
     return () => {
       engine.setPointerConverter(null)
       el.removeEventListener('pointerdown', down)
       el.removeEventListener('pointermove', move)
       el.removeEventListener('pointerup', up)
       el.removeEventListener('pointercancel', cancel)
+      el.removeEventListener('contextmenu', context)
     }
+  }, [])
+
+  // --- keyboard (laptop / projector): M toggles, arrows move, Enter chooses ------
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement) return
+      const k = e.key
+      if (k === 'm' || k === 'M') engine.menu.toggleMode()
+      else if (modeRef.current !== 'menu') return
+      else if (k === 'ArrowDown' || k === 'ArrowRight') engine.menu.next()
+      else if (k === 'ArrowUp' || k === 'ArrowLeft') engine.menu.previous()
+      else if (k === 'Enter' || k === ' ') engine.menu.activate()
+      else return
+      e.preventDefault()
+    }
+    window.addEventListener('keydown', key)
+    return () => window.removeEventListener('keydown', key)
   }, [])
 
   // --- geometry -------------------------------------------------------------
@@ -241,17 +238,17 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
     () => (series && range ? series.values.map((v) => (v === null ? null : normalise(v, range.min, range.max))) : []),
     [series, range],
   )
-  const runs = useMemo(() => (box ? smoothRuns(ys, box) : []), [ys, box])
+  const runs = useMemo(() => (box ? lineRuns(ys, box) : []), [ys, box])
   const path = useMemo(() => runsPath(runs), [runs])
   const curve = useMemo(() => (runs.length ? runsCurve(runs) : null), [runs])
   const px = (x: number) => (box ? box.left + x * box.width : 0)
   const py = (y: number) => (box ? box.top + (1 - y) * box.height : 0)
   const xAt = (i: number) => (n > 1 ? i / (n - 1) : 0.5)
 
-  // --- ring: Nico's spider-sense logic on the smooth line ---------------------
+  // --- ring: Nico's spider-sense logic on the line ------------------------------
   // Before the line is picked up it points to the START; on the line it points ALONG it toward
-  // the end (or toward the engine's Explain target); off the line it points back to where the
-  // finger left. Speech and buzz still come from Person 3's engine.
+  // the end (or toward the engine's target: Next point, Maximum, Minimum); off the line it points
+  // back to where the finger left.
   const target = status.targetIndex
   const targetValue = target !== null ? (ys[target] ?? null) : null
   const startPoint = runs.length ? runs[0][0] : null
@@ -263,7 +260,6 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
   // Rebuilt each render (after commit) so pointer events always step with the current curve/goal.
   useEffect(() => {
     stepRef.current = (p: Point | null) => {
-      pointerRef.current = p
       if (!curve) return
       const prev = senseRef.current.curve === curve ? senseRef.current.s : INITIAL_STATE
       const next = stepSpiderSense(prev, p, curve, ringRadius, { guideTo: goal, startAt: startPoint })
@@ -276,7 +272,6 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
   })
 
   const sense = senseState.curve === curve ? senseState.s : INITIAL_STATE
-
   const contact = sense.lastContact
   const reached = sense.goalReached && target !== null ? target : null
   const ring =
@@ -290,37 +285,9 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
         }
       : null
 
-  // --- status line ---------------------------------------------------------
-  const parts = ['simulated ring']
-  if (status.mode === 'menu') {
-    parts.push(`menu: ${status.menuItem ?? '-'} (${status.menuPosition.index + 1}/${status.menuPosition.total})`)
-  } else {
-    parts.push('graph')
-    parts.push(
-      sense.pointer === null
-        ? 'move to start'
-        : sense.goalReached
-          ? target === null ? 'end of graph' : 'on the point'
-          : sense.phase === 'on-curve'
-            ? 'on line, follow it'
-            : sense.lastContact === null
-              ? 'go to the start'
-              : 'back to the line',
-    )
-    if (reading && finger) {
-      if (reading.state !== 'off-chart') {
-        parts.push(`${graph.xAxis.values[reading.index] ?? ''}: ${fmt(series?.values[reading.index], graph.yAxis.unit)}`)
-      }
-    } else parts.push('no touch')
-  }
-  if (status.explaining && status.explainStep) parts.push(`explaining ${status.explainStep} of ${n}`)
-  else if (target !== null) parts.push(`target ${graph.xAxis.values[target] ?? target + 1}`)
-  if (graph.series.length > 1) parts.push(`line ${seriesIndex + 1}/${graph.series.length}: ${series?.name}`)
-  if (status.graphKind === 'continuous') parts.push('continuous')
-  if (lastPattern) parts.push(`pulse ${lastPattern}: ${lastMeaning}`)
-
-  // Saved graphs arrive with their reasoning; live ones get it from /reason.
-  const canAsk = reasoning !== null || hasReasoning
+  const inMenu = status.mode === 'menu'
+  const items = inMenu ? engine.menu.visible : []
+  const modeLabel = inMenu ? 'Menu mode' : 'Graph mode'
   const xs = graph.xAxis.values
   const labelIdx = [...new Set([0, Math.floor((n - 1) / 2), n - 1])]
 
@@ -340,121 +307,119 @@ export function ExplorePage({ graph, fieldConfidence, reasoning, fetchReasoning,
         </button>
       </header>
 
-      <div className="explore__body">
-      <div className="explore__panel" ref={panelRef} role="application" aria-label={`Graph: ${graph.title}`}>
-        {box && (
-          <div
-            className="explore__plot"
-            ref={plotRef}
-            style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
-            data-testid="plot"
-          />
-        )}
-        {size && box && (
-          <svg width={size.w} height={size.h} viewBox={`0 0 ${size.w} ${size.h}`} aria-hidden="true">
-            <g className="explore__labels">
-              {range && (
-                <>
-                  <text x={box.left - 6} y={box.top + 4} textAnchor="end">
-                    {range.max}
+      <div className="explore__body" ref={bodyRef}>
+        <div
+          className="explore__panel"
+          ref={panelRef}
+          role="application"
+          aria-label={`Graph: ${graph.title}`}
+          aria-hidden={inMenu}
+        >
+          {box && (
+            <div
+              className="explore__plot"
+              ref={plotRef}
+              style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
+              data-testid="plot"
+            />
+          )}
+          {size && box && (
+            <svg width={size.w} height={size.h} viewBox={`0 0 ${size.w} ${size.h}`} aria-hidden="true">
+              <g className="explore__labels">
+                {range && (
+                  <>
+                    <text x={box.left - 6} y={box.top + 4} textAnchor="end">
+                      {range.max}
+                    </text>
+                    <text x={box.left - 6} y={box.top + box.height} textAnchor="end">
+                      {range.min}
+                    </text>
+                  </>
+                )}
+                {labelIdx.map((i) => (
+                  <text
+                    key={i}
+                    x={px(xAt(i))}
+                    y={box.top + box.height + 17}
+                    textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'}
+                  >
+                    {xs[i]}
                   </text>
-                  <text x={box.left - 6} y={box.top + box.height} textAnchor="end">
-                    {range.min}
-                  </text>
-                </>
+                ))}
+              </g>
+              <path className="explore__curve" d={path} data-testid="curve" />
+              {/* A dot on every data point, like the photographed graph. */}
+              {ys.map((y, i) =>
+                y === null ? null : (
+                  <circle key={i} className="explore__dot" cx={px(xAt(i))} cy={py(y)} r={5} data-testid="dot" />
+                ),
               )}
-              {labelIdx.map((i) => (
-                <text
-                  key={i}
-                  x={px(xAt(i))}
-                  y={box.top + box.height + 17}
-                  textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'}
-                >
-                  {xs[i]}
-                </text>
-              ))}
-            </g>
-            <path className="explore__curve" d={path} data-testid="curve" />
-            {sense.lastContact === null && startPoint && (
-              <circle className="explore__target" cx={startPoint.x} cy={startPoint.y} r={7} data-testid="start" />
-            )}
-            {target !== null && targetValue !== null && (
-              <circle
-                className="explore__target"
-                cx={px(xAt(target))}
-                cy={py(targetValue)}
-                r={7}
-                data-testid="target"
-                data-index={target}
-              />
-            )}
-            {reached !== null && ys[reached] != null && (
-              <circle className="explore__reached" cx={px(xAt(reached))} cy={py(ys[reached] as number)} r={6} />
-            )}
-            {contact && <circle className="spider-sense__contact" cx={contact.x} cy={contact.y} r={5} />}
-            {ring && <EngineRing {...ring} radius={ringRadius} />}
-          </svg>
+              {sense.lastContact === null && startPoint && (
+                <circle className="explore__target" cx={startPoint.x} cy={startPoint.y} r={9} data-testid="start" />
+              )}
+              {target !== null && targetValue !== null && (
+                <circle
+                  className="explore__target"
+                  cx={px(xAt(target))}
+                  cy={py(targetValue)}
+                  r={9}
+                  data-testid="target"
+                  data-index={target}
+                />
+              )}
+              {reached !== null && ys[reached] != null && (
+                <circle className="explore__reached" cx={px(xAt(reached))} cy={py(ys[reached] as number)} r={7} />
+              )}
+              {contact && <circle className="spider-sense__contact" cx={contact.x} cy={contact.y} r={5} />}
+              {ring && <EngineRing {...ring} radius={ringRadius} />}
+            </svg>
+          )}
+        </div>
+
+        {inMenu && (
+          <ul className="explore__menu" role="listbox" aria-label="Menu" data-testid="menu">
+            {items.map((item, i) => (
+              <li
+                key={item.id}
+                role="option"
+                aria-selected={i === status.menuPosition.index}
+                className={i === status.menuPosition.index ? 'explore__menu-item is-focused' : 'explore__menu-item'}
+                onClick={() => {
+                  // Touch already went through the gestures (tap = choose the focused item).
+                  if (lastPointerType.current !== 'mouse') return
+                  engine.menu.focus(item.id)
+                  engine.menu.activate()
+                }}
+              >
+                <span className="explore__menu-label">{item.label}</span>
+                {item.hint && <span className="explore__menu-hint">{item.hint}</span>}
+              </li>
+            ))}
+          </ul>
         )}
       </div>
 
-      {/* The demo walkthrough's steps (docs/person3-demo.md). Gestures still work for a blind user. */}
-      <nav className="explore__actions" aria-label="Actions">
-        <button type="button" className="explore__action explore__action--primary" onClick={runOverview}>
-          Overview
-        </button>
-        <button type="button" className="explore__action" onClick={() => engine.nextPoint()}>
-          Next point
-        </button>
-        <button type="button" className="explore__action" onClick={() => engine.explain()}>
-          Explain
-        </button>
-        <button
-          type="button"
-          className="explore__action"
-          disabled={!canAsk}
-          title={canAsk ? undefined : 'Needs /reason'}
-          onClick={() => runAsk('max')}
-        >
-          Where is the maximum?
-        </button>
-        <button type="button" className="explore__action explore__action--ghost" onClick={runStop}>
-          Stop speaking
-        </button>
-        <button
-          type="button"
-          className="explore__action explore__action--ghost"
-          onClick={() => {
-            engine.stopAll()
-            onReset()
-          }}
-        >
-          Start over
-        </button>
-      </nav>
-      </div>
-
-      <p className="explore__status" data-testid="status">
-        {parts.join(' · ')}
+      <p className="explore__mode" data-testid="mode">
+        {modeLabel}
       </p>
-      <p className="explore__said" aria-live="polite" data-testid="said">
+      {/* Screen readers still get what was spoken; it's not shown on screen. */}
+      <p className="sr-only" aria-live="polite" data-testid="said">
         {lastSpoken}
       </p>
-      <p className="explore__hints">{status.mode === 'menu' ? MENU_HINTS : GRAPH_HINTS}</p>
 
       {helpOpen && (
         <div className="explore__help" role="dialog" aria-label="Gestures">
           <p className="explore__help-head">Two modes; a two-finger tap switches between them.</p>
           <ul>
             <li>
-              <b>Menu</b>: swipe right or down for the next action, left or up for the previous one; tap to choose;
-              long press repeats it. Actions: Overview, Explain each point, Explore freely, Repeat, Switch series
-              (several lines only), Stop speaking.
+              <b>Graph</b>: move or drag to follow the ring; it points to the start of the line, then along it.
+              Tap reads the point, long press explains it.
             </li>
             <li>
-              <b>Graph</b>: drag one finger to trace; the ring and buzz point you to the line. Tap re-reads the point,
-              long press explains it.
+              <b>Menu</b>: swipe right or down for the next action, left or up for the previous one; tap to choose.
+              Actions: Overview, Next point, Explain, Maximum, Minimum, Start over.
             </li>
-            <li>Buzz: rising / falling = move up / down, double = on the point, long = edge or unreadable.</li>
+            <li>Laptop: right-click or M switches modes; arrow keys move in the menu; Enter chooses.</li>
           </ul>
           <p className="explore__help-links">
             <button type="button" onClick={onSliderMode}>
