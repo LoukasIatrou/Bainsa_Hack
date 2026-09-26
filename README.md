@@ -25,7 +25,7 @@ Scope for now: **line graphs only**. Other chart types are future scope.
 ## Person 2 - reasoning status
 
 - `POST /reason` turns the confirmed graph into everything the Explore page needs, in **one call**:
-  the Overview text (graph type and axes), the ring `trace` (slope angle and strength along the
+  the Overview text (one sentence of shape; Person 3 speaks the axes), the ring `trace` (slope angle and strength along the
   curve), the Next point stops (`interestPoints`) with their Explain text, and per-point values.
   After that, exploration needs no network, and the response can be cached as-is for fallback mode.
 - The ring is the main output; speech is kept brief. Every number is computed deterministically;

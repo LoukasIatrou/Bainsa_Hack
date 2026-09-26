@@ -64,7 +64,7 @@
       "properties": {
         "text": {
           "type": "string",
-          "description": "Spoken by the Overview button: graph type and axes (with the value range). The shape is left for the ring to reveal. GraphData.summary is ignored."
+          "description": "One sentence on the graph's shape, e.g. 'It spikes to 8.1 percent in 2020, then falls back.' Spoken right after Person 3's describeAxes (type, title, axes), so it does not repeat them. GraphData.summary is ignored."
         },
         "caveats": {
           "type": "array",

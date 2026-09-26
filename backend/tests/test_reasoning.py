@@ -28,12 +28,11 @@ def series(result, name):
 # --- demo graph: US unemployment ---
 
 
-def test_unemployment_overview_is_type_and_axes():
+def test_unemployment_overview_is_shape_only():
+    # Person 3's describeAxes already speaks type, title and axes just before this
     r = run("unemployment_us")
-    assert r.overview.text == (
-        "Line graph: US unemployment rate, yearly average. Across: year, 2016 to 2024. "
-        "Up: unemployment rate, in percent, from 3.6 to 8.1."
-    )
+    assert r.overview.text == "It spikes to 8.1 percent in 2020, then falls back."
+    assert "axis" not in r.overview.text.lower() and "Across" not in r.overview.text
 
 
 def test_unemployment_brief_answers():
@@ -89,7 +88,9 @@ def test_italy_japan_max_and_compare():
     r = run("mobile_italy_japan")
     assert r.answers.max.answer == "Highest: 169 per 100 people, Japan in 2022."
     assert "cross between 2017 and 2018" in r.answers.compare.answer
-    assert "2 lines: Italy and Japan" in r.overview.text
+    assert r.overview.text == (
+        "Italy falls from 159 to 132 per 100 people; Japan rises from 104 to 169 per 100 people."
+    )
 
 
 def test_overview_ignores_extraction_summary():
@@ -191,7 +192,7 @@ def test_rounding_keeps_data_precision():
 def test_singular_unit_and_title_punctuation():
     r = reason(graph([[1, 2, 3]], title="Sales by month."))
     assert r.series[0].interestPoints[0].explain.startswith("M1, 1 degree Celsius.")
-    assert "Line graph: Sales by month. Across" in r.overview.text
+    assert r.overview.text == "It rises from 1 to 3 degrees Celsius."
 
 
 def test_length_mismatch_caveat():

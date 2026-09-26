@@ -25,7 +25,7 @@ uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 | Use | Field | Example (`unemployment_us`) |
 |---|---|---|
-| Overview button (speech) | `overview.text` - graph type and axes | "Line graph: US unemployment rate, yearly average. Across: year, 2016 to 2024. Up: unemployment rate, in percent, from 3.6 to 8.1." |
+| Overview button (speech) | `overview.text` - one sentence of shape, spoken after Person 3's axes line | "It spikes to 8.1 percent in 2020, then falls back." |
 | Ring guidance along the curve | `series[].trace[]` - `angle` (0 = flat, +90 = straight up, -90 = straight down), `strength` (0-1), `direction`, positioned by `startFraction`/`endFraction` (0 = left edge, 1 = right edge) | 2019 -> 2020: angle 78, strength 0.98, up |
 | Next point button | `series[].interestPoints[]` - `xFraction`, `normalised` (where to guide the finger), `kinds` | start, 2019 low, 2020 max/peak, 2023 min/low, end |
 | Explain button (speech) | `interestPoints[].explain` | "2020, 8.1 percent. The highest point; after this it falls." |

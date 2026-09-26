@@ -93,13 +93,6 @@ def times_word(n: int) -> str:
     return {1: "once", 2: "twice"}.get(n, f"{n} times")
 
 
-def lower_first(text: str) -> str:
-    # "Temperature" -> "temperature", but leave acronyms like "GDP" alone
-    if len(text) > 1 and text[0].isupper() and text[1].islower():
-        return text[0].lower() + text[1:]
-    return text
-
-
 @dataclass
 class Speaker:
     unit: str
@@ -430,25 +423,17 @@ class Reasoner:
             sentences.append(f"The biggest gap is {self.sp.say(big_gap)}, in {self.xl(big_i)}, with {ahead} ahead.")
         return Answer(answer=" ".join(sentences), highlight=highlight, caveats=caveats)
 
-    # overview - graph type and axes; the shape itself is left for the ring to reveal
+    # overview - one sentence of shape. Person 3's engine already speaks the graph
+    # type, title and axes (describeAxes) right before this, so don't repeat them.
 
     def overview(self, style: str) -> Overview:
-        g = self.graph
-        title = g.title.strip().rstrip(".!?;:,")
-        sentences = [f"Line graph: {title}."]
-        across = self.x_span(len(self.x)).replace(" from ", ", ", 1)
-        sentences.append(f"Across: {lower_first(g.xAxis.label)}{across}.")
-        unit = self.sp.unit
-        unit = (f" {unit}" if unit.startswith("per ") else f", in {unit}") if unit else ""
-        up = f"Up: {lower_first(g.yAxis.label)}{unit}"
-        if self.lo is not None and self.span > 0:
-            up += f", from {self.sp.num(self.lo)} to {self.sp.num(self.hi)}"
-        sentences.append(up + ".")
-        if self.multi:
-            sentences.append(f"{plural(len(self.series), 'line')}: {join_words([s.name for s in self.series])}.")
-        if self.lo is None:
-            sentences.append("No values could be read.")
-        text = " ".join(sentences)
+        readable = [s for s in self.series if not s.empty]
+        if not readable:
+            text = "No values could be read."
+        elif not self.multi:
+            text = f"It {self.brief_shape(readable[0])}."
+        else:
+            text = "; ".join(f"{s.name} {self.brief_shape(s)}" for s in readable[:3]) + "."
         if self.low_confidence:
             warning = "Values are approximate."
             text = f"{warning} {text}" if style == "uncertainty_first" else f"{text} {warning}"
