@@ -141,6 +141,7 @@ export class SpeechQueue {
   private voices: SpeechSynthesisVoice[] = [];
   private rate = 1;
   private pitch = 1;
+  private volume = 1;
   private paused = false;
   /** Set while we are tearing down an utterance on purpose, so onend is ignored. */
   private discarding = false;
@@ -194,6 +195,21 @@ export class SpeechQueue {
 
   get currentPitch(): number {
     return this.pitch;
+  }
+
+  get currentVolume(): number {
+    return this.volume;
+  }
+
+  /**
+   * 0-1, default 1 (maximum).
+   *
+   * This is the API's own scale, not the device's -- it cannot exceed the
+   * phone's media volume, so "louder" ultimately means turning the phone up.
+   * Exposed so a quieter setting is possible, not because 1 can be beaten.
+   */
+  setVolume(volume: number): void {
+    this.volume = Math.min(1, Math.max(0, volume));
   }
 
   /**
@@ -400,6 +416,7 @@ export class SpeechQueue {
     const utterance = new SpeechSynthesisUtterance(chunk);
     utterance.rate = this.rate;
     utterance.pitch = this.pitch;
+    utterance.volume = this.volume;
     if (this.voice) utterance.voice = this.voice;
 
     utterance.onend = () => {

@@ -167,6 +167,56 @@ the flash can never disagree about which point they are showing.
 exposes `navigator.vibrate` and silently does nothing, with no way to detect
 the difference, and doc 4 forbids the ring implying hardware it cannot confirm.
 
+## Gestures: menu mode and graph mode
+
+A self-voicing interface with no buttons. Swipe between spoken actions, tap to
+choose, two-finger tap to switch between the menu and the graph.
+
+```ts
+el.addEventListener('pointerdown', (e) => engine.gestures.pointerDown(e));
+el.addEventListener('pointermove', (e) => engine.gestures.pointerMove(e));
+el.addEventListener('pointerup',   (e) => engine.gestures.pointerUp(e));
+el.addEventListener('pointercancel', (e) => engine.gestures.pointerCancel(e));
+
+// So drags can steer the curve directly:
+engine.setPointerConverter((x, y) =>
+  fromPointerEvent({ clientX: x, clientY: y }, chartEl));
+```
+
+The element needs `touch-action: none`, or the browser scrolls instead.
+
+| Gesture | Menu mode | Graph mode |
+| --- | --- | --- |
+| Swipe right / down | Next action | — |
+| Swipe left / up | Previous action | — |
+| Single-finger drag | — | Trace the curve |
+| Tap | Activate the action | Re-read the current point |
+| Long press | Re-read the action | Explain this point |
+| **Two-finger tap** | **Switch to graph mode** | **Back to the menu** |
+
+Two-finger tap is the toggle because it cannot happen by accident while tracing
+a line, and screen-reader users already know it from elsewhere.
+
+The menu stops at both ends instead of wrapping, with a `long` pulse and "Start
+of menu" / "End of menu" — wrapping costs a blind user their sense of where the
+list begins. Unavailable actions are omitted rather than read out as disabled,
+so no swipe is wasted: Explain is simply absent on a continuous curve, and
+Switch series absent on a single-series graph.
+
+Replace the default actions with `engine.menu.setItems([...])`.
+
+### This claims gestures TalkBack normally owns
+
+A self-voicing app speaks everything itself, which means taking over the
+single-finger gestures a screen reader would otherwise use.
+`docs/phone-demo-navigation.md` 1 argued the opposite -- let TalkBack drive a
+native slider -- and both designs are valid, but they cannot be mixed on one
+surface. Pick per screen and tell the team which you picked.
+
+`engine.speech.setVolume(0-1)` exists but 1 is already the default and the API
+cannot exceed the phone's media volume; "louder" ultimately means turning the
+phone up.
+
 ## Continuous vs discrete
 
 ```ts

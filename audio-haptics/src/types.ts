@@ -158,6 +158,11 @@ export interface EngineStatus {
   speechUsable: boolean;
   /** Continuous curves have no Explain mode; discrete ones do. */
   graphKind: GraphKind;
+  /** 'menu' = swipe between spoken actions. 'graph' = trace the curve. */
+  mode: 'menu' | 'graph';
+  /** Label of the focused menu item, or null in graph mode with no menu. */
+  menuItem: string | null;
+  menuPosition: { index: number; total: number };
   /** True while the Explain walkthrough is stepping through points. */
   explaining: boolean;
   /** Which point Explain mode is currently on, 1-based for display. */

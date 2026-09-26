@@ -51,6 +51,10 @@ import {
 import { Explorer } from './explorer.js';
 import { Guidance } from './guidance.js';
 import { ExplainMode } from './explain-mode.js';
+import { MenuController } from './menu.js';
+import type { AppMode, MenuItem } from './menu.js';
+import { GestureRecogniser } from './gestures.js';
+import type { Gesture } from './gestures.js';
 import type { GuidanceReading } from './guidance.js';
 import {
   inferGraphKind,
@@ -89,6 +93,8 @@ export class AudioHapticEngine {
   readonly explore: Explorer;
   readonly guidance: Guidance;
   readonly explainMode: ExplainMode;
+  readonly menu: MenuController;
+  readonly gestures: GestureRecogniser;
 
   private listeners = new Set<EngineListener>();
   private graph: GraphData | null = null;
@@ -98,6 +104,8 @@ export class AudioHapticEngine {
   private lastSonifyOptions: SonifyOptions = {};
   private concise: boolean;
   private graphKind: GraphKind = 'discrete';
+  private pointerConverter:
+    ((clientX: number, clientY: number) => { x: number; y: number } | null) | null = null;
 
   constructor(options: EngineOptions = {}) {
     const emit = (event: EngineEvent) => this.dispatch(event);
@@ -149,6 +157,161 @@ export class AudioHapticEngine {
     this.on((event) => {
       if (event.type === 'speech:idle') this.explainMode.handleSpeechIdle();
     });
+
+    this.menu = new MenuController({
+      speak: (text, priority) => this.speech.speak(text, priority),
+      pulse: (pattern) => this.haptics.play(pattern),
+      onChange: () => this.broadcastStatus(),
+      onEnterGraphMode: () => {
+        if (this.graph) this.guidance.start(this.explainMode.currentIndex ?? null);
+      },
+      onExitGraphMode: () => {
+        this.guidance.stop();
+      },
+    });
+    this.menu.setItems(this.defaultMenuItems());
+
+    this.gestures = new GestureRecogniser(
+      (gesture) => this.handleGesture(gesture),
+      { isTracing: () => this.menu.currentMode === 'graph' },
+    );
+  }
+
+  // -- gestures and the spoken menu -------------------------------------------
+
+  /**
+   * The default actions, adapting to what the graph supports. Replace wholesale
+   * with `engine.menu.setItems()` if the app wants different ones.
+   *
+   * Explain is absent rather than disabled on a continuous curve: reading out
+   * an option that cannot be chosen wastes a swipe.
+   */
+  private defaultMenuItems(): MenuItem[] {
+    return [
+      {
+        id: 'overview',
+        label: 'Overview',
+        hint: 'Hear the shape of the whole graph.',
+        activate: () => {
+          this.menu.setMode('graph');
+          this.startOverview();
+        },
+      },
+      {
+        id: 'explain',
+        label: 'Explain each point',
+        hint: 'Guided walk through every point.',
+        available: () => this.supportsExplainMode && this.graph !== null,
+        activate: () => {
+          this.menu.setMode('graph');
+          this.startExplainMode();
+        },
+      },
+      {
+        id: 'graph',
+        label: 'Explore freely',
+        hint: 'Trace the curve with a finger.',
+        available: () => this.graph !== null,
+        activate: () => this.menu.setMode('graph'),
+      },
+      {
+        id: 'repeat',
+        label: 'Repeat that',
+        activate: () => this.replay(),
+      },
+      {
+        id: 'series',
+        label: 'Switch series',
+        available: () => (this.graph?.series.length ?? 0) > 1,
+        activate: () => this.explore.nextSeries(),
+      },
+      {
+        id: 'stop',
+        label: 'Stop speaking',
+        activate: () => this.stopSpeaking(),
+      },
+    ];
+  }
+
+  /**
+   * Feed pointer events here and the engine handles both modes:
+   *
+   *   el.addEventListener('pointerdown', (e) => engine.gestures.pointerDown(e));
+   *   el.addEventListener('pointermove', (e) => engine.gestures.pointerMove(e));
+   *   el.addEventListener('pointerup',   (e) => engine.gestures.pointerUp(e));
+   *
+   * The element needs `touch-action: none`, or the browser will scroll instead.
+   */
+  private handleGesture(gesture: Gesture): void {
+    // Works in both modes, and is the only gesture that does.
+    if (gesture.type === 'two-finger-tap') {
+      this.menu.toggleMode();
+      return;
+    }
+
+    if (this.menu.currentMode === 'menu') {
+      switch (gesture.type) {
+        case 'swipe':
+          if (gesture.direction === 'right' || gesture.direction === 'down') this.menu.next();
+          else this.menu.previous();
+          return;
+        case 'tap':
+          this.menu.activate();
+          return;
+        case 'long-press':
+          this.menu.announceCurrent();
+          return;
+        default:
+          return;
+      }
+    }
+
+    // Graph mode: dragging traces the curve, a tap re-reads where the finger is.
+    switch (gesture.type) {
+      case 'drag': {
+        // Gestures carry client pixels; guidance works in normalised data
+        // space. Without a converter the app is driving guidance itself, so
+        // feeding raw pixels here would read as "off-chart" and buzz wrongly.
+        if (!this.pointerConverter) return;
+        const point = this.pointerConverter(gesture.x, gesture.y);
+        if (point) this.guidance.update(point.x, point.y);
+        return;
+      }
+      case 'tap':
+        this.speakCurrentPoint();
+        return;
+      case 'long-press':
+        this.explain();
+        return;
+      default:
+    }
+  }
+
+  /**
+   * Teach the engine how to turn client pixels into normalised data space, so
+   * drags recognised by the gesture layer can drive guidance directly.
+   *
+   * y must increase *upward* (0 at the graph minimum, 1 at the maximum), the
+   * opposite of clientY -- `fromPointerEvent` does that conversion.
+   *
+   *   engine.setPointerConverter((x, y) => fromPointerEvent({ clientX: x, clientY: y }, chartEl));
+   *
+   * Without one, drag gestures are ignored and the app is assumed to be calling
+   * `engine.guide()` itself.
+   */
+  setPointerConverter(
+    convert: ((clientX: number, clientY: number) => { x: number; y: number } | null) | null,
+  ): void {
+    this.pointerConverter = convert;
+  }
+
+  /** Current interaction mode. */
+  getMode(): AppMode {
+    return this.menu.currentMode;
+  }
+
+  setMode(mode: AppMode): void {
+    this.menu.setMode(mode);
   }
 
   // -- graph kind -------------------------------------------------------------
@@ -834,6 +997,9 @@ export class AudioHapticEngine {
       speechVoices: this.speech.voiceCount,
       speechUsable: this.speech.usable,
       graphKind: this.graphKind,
+      mode: this.menu.currentMode,
+      menuItem: this.menu.current?.label ?? null,
+      menuPosition: this.menu.position,
       explaining: this.explainMode.active,
       explainStep: this.explainMode.step,
       guiding: this.guidance.isActive,
@@ -848,6 +1014,10 @@ export { Sonifier } from './sonification.js';
 export { Explorer } from './explorer.js';
 export { Guidance, fromPointerEvent } from './guidance.js';
 export { ExplainMode } from './explain-mode.js';
+export { MenuController } from './menu.js';
+export type { AppMode, MenuItem } from './menu.js';
+export { GestureRecogniser } from './gestures.js';
+export type { Gesture, GestureOptions, SwipeDirection } from './gestures.js';
 export {
   RING_PATTERN_LABELS,
   createRingBinding,
