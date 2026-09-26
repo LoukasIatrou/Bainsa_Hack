@@ -9,6 +9,10 @@ export default defineConfig({
     // loads http://localhost:5173 on-device - no LAN exposure or HTTPS
     // cert needed, since mobile browsers treat localhost as a secure context
     // (required for getUserMedia/camera access).
+    // `adb reverse` connects to 127.0.0.1 on the host - bind IPv4 explicitly,
+    // since Vite's default `localhost` binding can resolve to the IPv6
+    // loopback only.
+    host: '127.0.0.1',
     proxy: {
       // Same-origin proxy to the backend avoids CORS.
       '/api': {
