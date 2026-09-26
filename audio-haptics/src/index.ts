@@ -74,6 +74,16 @@ import {
   describeSonification,
 } from './phrasing.js';
 
+/**
+ * Spoken instead of steering the finger backwards across the curve.
+ *
+ * Dragging back through every point to reach an earlier one narrates the whole
+ * graph in reverse; lifting off and restarting from the left is faster and
+ * keeps the mental model of the curve running left to right.
+ */
+const RESTART_INSTRUCTION =
+  'Lift your finger and start again from the left edge of the graph.';
+
 export interface EngineOptions {
   /**
    * Use the phone's vibration motor. **Off by default.**
@@ -160,7 +170,8 @@ export class AudioHapticEngine {
     this.explainMode = new ExplainMode({
       getGraph: () => this.graph,
       getPointCount: () => (this.graph ? pointCount(this.graph) : 0),
-      setTarget: (index) => this.guidance.start(index),
+      setTarget: (index, options) => this.guidance.start(index, options ?? {}),
+      needsRestart: (index) => this.guidance.needsRestart(index),
       clearTarget: () => this.guidance.setTarget(null),
       speak: (text, priority) => this.speech.speak(text, priority),
       describe: (index) => this.explanationFor(index),
@@ -371,6 +382,9 @@ export class AudioHapticEngine {
     } else if (this.graph.summary) {
       this.speech.speak(this.graph.summary, 'normal');
     }
+    // Overview always restarts the walk at the first point.
+    const goingBackwards = this.guidance.needsRestart(0);
+
     // Silent: guidance announces the first point on arrival, so speaking it
     // here as well would say it twice.
     this.explore.focus(0, { announce: false });
@@ -378,7 +392,11 @@ export class AudioHapticEngine {
     // A continuous curve has no point worth stopping at, so guidance steers the
     // finger onto the line and then simply follows it -- no target, no arrival.
     // A discrete graph starts at the first point.
-    this.guidance.start(this.graphKind === 'continuous' ? null : 0);
+    this.guidance.start(
+      this.graphKind === 'continuous' ? null : 0,
+      { quietApproach: goingBackwards },
+    );
+    if (goingBackwards) this.speech.speak(RESTART_INSTRUCTION, 'normal');
     this.broadcastStatus();
   }
 
@@ -444,13 +462,25 @@ export class AudioHapticEngine {
       ?? this.guidance.getTarget()
       ?? this.explore.currentPoint;
     const next = this.nextInterestingIndex(from);
+
     if (next === null) {
-      this.speech.speak('That is the last point of the curve.', 'interrupt');
+      // Past the last point, the next one is the first again. Retracing the
+      // whole curve backwards to get there is slower and more confusing than
+      // lifting off, so say that instead of steering them through every point.
+      this.explore.focus(0, { announce: false });
+      this.guidance.start(0, { quietApproach: true });
       this.haptics.play('long');
+      this.speech.speak(`That was the last point. ${RESTART_INSTRUCTION}`, 'interrupt');
+      this.broadcastStatus();
       return;
     }
-    this.guidance.start(next);
-    this.speech.speak('Follow the vibration to the next point.', 'interrupt');
+
+    const goingBackwards = this.guidance.needsRestart(next);
+    this.guidance.start(next, { quietApproach: goingBackwards });
+    this.speech.speak(
+      goingBackwards ? RESTART_INSTRUCTION : 'Follow the vibration to the next point.',
+      'interrupt',
+    );
     this.broadcastStatus();
   }
 

@@ -81,6 +81,14 @@ export class Guidance {
   private lastIndex = -1;
   private targetIndex: number | null = null;
   private announcedArrival = false;
+  /**
+   * Suppress the per-point ticks on the way to the target.
+   *
+   * Set when the target is *behind* the finger. Ticking through every point on
+   * the way back would narrate the whole curve in reverse, which is noise: the
+   * user has been told to return to the start, and only arriving there matters.
+   */
+  private quietApproach = false;
   /** Last x index the finger was actually on the curve at. */
   private currentIndex: number | null = null;
 
@@ -103,15 +111,20 @@ export class Guidance {
     return this.currentIndex;
   }
 
-  start(targetIndex: number | null = null): void {
+  start(
+    targetIndex: number | null = null,
+    options: { quietApproach?: boolean } = {},
+  ): void {
     this.active = true;
     this.targetIndex = targetIndex;
+    this.quietApproach = options.quietApproach === true;
     this.announcedArrival = false;
     this.lastState = 'idle';
     this.lastIndex = -1;
-    this.currentIndex = null;
     this.lastPulseAt = 0;
     this.lastTickAt = 0;
+    // currentIndex survives start(): needsRestart() has to know where the
+    // finger already is in order to decide whether to send them back.
   }
 
   stop(): void {
@@ -121,9 +134,22 @@ export class Guidance {
   }
 
   /** Aim the user at a particular x position; arrival fires `onArrive`. */
-  setTarget(index: number | null): void {
+  setTarget(index: number | null, options: { quietApproach?: boolean } = {}): void {
     this.targetIndex = index;
     this.announcedArrival = false;
+    this.quietApproach = options.quietApproach === true;
+  }
+
+  /**
+   * Whether reaching `target` would mean dragging backwards over the curve.
+   *
+   * Beyond a couple of points, retracing is slower and more confusing than
+   * lifting off and starting again from the left edge.
+   */
+  needsRestart(target: number, backtrackLimit = 2): boolean {
+    const current = this.currentIndex;
+    if (current === null) return false;
+    return current - target > backtrackLimit;
   }
 
   getTarget(): number | null {
@@ -250,11 +276,22 @@ export class Guidance {
         const hittingTarget = this.targetIndex !== null
           && reading.index === this.targetIndex
           && !this.announcedArrival;
+
+        // Heading back to the start: stay quiet until they get there.
+        if (this.quietApproach && !hittingTarget) {
+          this.lastTickAt = now;
+          this.lastIndex = reading.index;
+          this.currentIndex = reading.index;
+          this.lastState = reading.state;
+          return reading;
+        }
+
         this.fire(hittingTarget ? 'double' : 'short', reading, now);
         this.sonifyIndex(reading.index);
         this.lastTickAt = now;
         this.lastIndex = reading.index;
         this.currentIndex = reading.index;
+        if (hittingTarget) this.quietApproach = false;
         this.checkArrival(reading.index);
       }
       this.lastState = reading.state;

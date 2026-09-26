@@ -55,6 +55,21 @@ about where the user is.
 The kind is inferred on load (many points, or 25+ bare numeric labels, reads as
 continuous) and can be overridden with `engine.setGraphKind()`.
 
+### Going backwards: don't, say so instead
+
+The curve is explored left to right. When a new target is more than two points
+*behind* the finger -- Overview restarting, or Next point wrapping past the last
+point back to the first -- the engine does not steer the user backwards through
+every point. It says:
+
+> Lift your finger and start again from the left edge of the graph.
+
+and stays silent until they arrive. Retracing narrates the whole graph in
+reverse, which is slower than lifting off and breaks the left-to-right mental
+model of the curve. One pulse still fires when the finger re-lands on the line,
+so they know they have found it, and the usual `double` confirms arrival at the
+target.
+
 ### Guidance mode (Explore page, finger on the chart)
 
 The user drags a finger over the graph and is steered onto the curve, then
