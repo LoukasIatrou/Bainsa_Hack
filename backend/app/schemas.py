@@ -88,7 +88,8 @@ class PointInsight(BaseModel):
     isMin: bool
     isTurningPoint: bool
     lowConfidence: bool
-    readout: str
+    readout: str  # brief: value and landmark only, e.g. '2020: 8.1, highest.'
+    explain: str  # coordinates, landmark, change from the previous point, what comes next
 
 
 class TraceSegment(BaseModel):

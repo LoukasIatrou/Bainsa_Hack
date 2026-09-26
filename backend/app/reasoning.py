@@ -26,6 +26,8 @@ from .schemas import (
 
 LOW_CONFIDENCE_THRESHOLD = 0.6  # same threshold as extraction._CONFIDENCE_THRESHOLD
 FLAT_FRACTION = 0.02  # moves smaller than 2% of the value range count as flat
+LANDMARK_FRACTION = 0.10  # a peak or low needs both legs to move at least 10% of the range
+MAX_STOPS = 6  # most 'Next point' stops per series
 CHART_ASPECT = 0.6  # default plot height / width for ring angles when the frontend doesn't send one
 
 _SPOKEN_UNITS = {
@@ -80,7 +82,7 @@ def plural(n: int, word: str) -> str:
     return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
 
-_SINGULAR_UNITS = {"degrees": "degree", "dollars": "dollar", "euros": "euro", "pounds": "pound"}
+_SINGULAR_UNITS = {"degrees": "degree", "dollars": "dollar", "euros": "euro", "pounds": "pound", "points": "point"}
 
 
 def join_words(items: list[str]) -> str:
@@ -98,20 +100,26 @@ class Speaker:
     unit: str
     approx: bool
     decimals: int = 0  # precision of the source data
+    max_decimals: int = 2  # 1 when the value range is over 1: '4.9', never '4.85'
 
     def num(self, value: float, extra: int = 0) -> str:
         """A value without its unit, e.g. 'about 145'. `extra` adds precision for averages."""
-        return ("about " if self.approx else "") + fmt_number(value, min(2, self.decimals + extra))
+        return ("about " if self.approx else "") + fmt_number(value, min(self.max_decimals, self.decimals + extra))
 
     def say(self, value: float, extra: int = 0) -> str:
         """A value with its unit, e.g. '12 degrees Celsius', '1 degree Celsius'."""
-        text = self.num(value, extra)
-        if not self.unit:
+        return self.with_unit(self.num(value, extra), self.unit)
+
+    def change(self, amount: float) -> str:
+        """A size of change, e.g. '0.5 percentage points' (a change in % is in percentage points)."""
+        return self.with_unit(self.num(amount), "percentage points" if self.unit == "percent" else self.unit)
+
+    @staticmethod
+    def with_unit(text: str, unit: str) -> str:
+        if not unit:
             return text
-        unit = self.unit
         if text.split()[-1] == "1":
-            first, _, rest = unit.partition(" ")
-            unit = " ".join(filter(None, [_SINGULAR_UNITS.get(first, first), rest]))
+            unit = " ".join(_SINGULAR_UNITS.get(w, w) for w in unit.split())
         return f"{text} {unit}"
 
 
@@ -124,6 +132,7 @@ class SeriesFacts:
     values: list[float | None]
     x: list[str]
     eps: float
+    min_move: float  # smallest leg a kept peak or low may have
     points: list[tuple[int, float]] = field(init=False)  # (index, value), non-null only
     missing: list[int] = field(init=False)
     turns: list[tuple[int, str]] = field(init=False)  # (index, "peak" | "trough")
@@ -131,7 +140,7 @@ class SeriesFacts:
     def __post_init__(self) -> None:
         self.points = [(i, v) for i, v in enumerate(self.values) if v is not None]
         self.missing = [i for i, v in enumerate(self.values) if v is None]
-        self.turns = find_turning_points(self.points, self.eps)
+        self.turns = self.keep_big_turns(find_turning_points(self.points, self.eps))
 
     @property
     def empty(self) -> bool:
@@ -159,6 +168,55 @@ class SeriesFacts:
     def extreme_indices(self, pick_max: bool) -> list[int]:
         target = (max if pick_max else min)(v for _, v in self.points)
         return [i for i, v in self.points if v == target]
+
+    # big landmarks only: small wobbles are not stops
+
+    def leg_sizes(self, turns: list[tuple[int, str]]) -> list[float]:
+        """Each turn's smaller leg: its move to the neighbouring turn or series end."""
+        if not turns:
+            return []
+        stops = [self.points[0][1]] + [self.values[i] for i, _ in turns] + [self.points[-1][1]]
+        return [min(abs(stops[k + 1] - stops[k]), abs(stops[k + 1] - stops[k + 2])) for k in range(len(turns))]
+
+    def keep_big_turns(self, turns: list[tuple[int, str]]) -> list[tuple[int, str]]:
+        """Drop the least prominent small turn, tidy up and re-check until every kept turn
+        has both legs >= min_move. The series max and min always stay (the biggest landmarks)."""
+        if not turns:
+            return turns
+        extremes = {max(v for _, v in self.points), min(v for _, v in self.points)}
+        turns = list(turns)
+        while True:
+            turns = self.tidy_turns(turns)
+            failing = [
+                (leg, k) for k, (leg, (i, _)) in enumerate(zip(self.leg_sizes(turns), turns))
+                if leg < self.min_move - 1e-9 and self.values[i] not in extremes
+            ]
+            if not failing:
+                return turns
+            del turns[min(failing)[1]]
+
+    def tidy_turns(self, turns: list[tuple[int, str]]) -> list[tuple[int, str]]:
+        """After a drop, merge neighbouring turns of the same kind (keeping the more
+        extreme) and drop an outer turn that no longer goes beyond the series end."""
+        changed = True
+        while changed and turns:
+            changed = False
+            for k in range(len(turns) - 1):
+                (i, kind), (j, other) = turns[k], turns[k + 1]
+                if kind == other:
+                    a, b = self.values[i], self.values[j]
+                    keep_first = a >= b if kind == "peak" else a <= b
+                    del turns[k + 1 if keep_first else k]
+                    changed = True
+                    break
+            for pos, end in ((0, self.points[0][1]), (-1, self.points[-1][1])):
+                if not turns:
+                    break
+                i, kind = turns[pos]
+                if (self.values[i] <= end) if kind == "peak" else (self.values[i] >= end):
+                    del turns[pos]
+                    changed = True
+        return turns
 
 
 def find_turning_points(points: list[tuple[int, float]], eps: float) -> list[tuple[int, str]]:
@@ -209,12 +267,15 @@ class Reasoner:
         self.x = graph.xAxis.values
         self.low_confidence = is_low_confidence(graph, field_confidence)
         all_values = [v for s in graph.series for v in s.values if v is not None]
-        self.sp = Speaker(spoken_unit(graph.yAxis.unit), self.low_confidence, data_decimals(all_values))
         self.lo = min(all_values) if all_values else None
         self.hi = max(all_values) if all_values else None
         self.span = (self.hi - self.lo) if all_values else 0.0
-        eps = self.span * FLAT_FRACTION
-        self.series = [SeriesFacts(s.name, s.values, self.x, eps) for s in graph.series]
+        self.sp = Speaker(
+            spoken_unit(graph.yAxis.unit), self.low_confidence, data_decimals(all_values),
+            max_decimals=1 if self.span > 1 else 2,
+        )
+        eps, min_move = self.span * FLAT_FRACTION, self.span * LANDMARK_FRACTION
+        self.series = [SeriesFacts(s.name, s.values, self.x, eps, min_move) for s in graph.series]
         self.multi = len(self.series) > 1
 
     def xl(self, index: int) -> str:
@@ -285,9 +346,10 @@ class Reasoner:
         return best if best_leg >= 0.3 * self.span else None
 
     def brief_shape(self, s: SeriesFacts, with_x: bool = False) -> str:
-        """e.g. 'spikes to 8.1 percent in 2020, then falls back' or 'rises from 104 to 169 per 100 people'."""
+        """e.g. 'spikes to 8.1 percent in 2020, then falls back to 4 percent by 2024'
+        or 'rises from 104 to 169 per 100 people'."""
         if len(s.points) == 1:
-            return f"only one value, {self.sp.say(s.points[0][1])}"
+            return f"has only one value, {self.sp.say(s.points[0][1])}"
         turn = self.prominent_turn(s)
         if turn:
             i, kind, sharp = turn
@@ -295,7 +357,8 @@ class Reasoner:
                 verb, back = ("spikes" if sharp else "rises"), "then falls back"
             else:
                 verb, back = ("plunges" if sharp else "falls"), "then recovers"
-            return f"{verb} to {self.sp.say(s.values[i])} in {self.xl(i)}, {back}"
+            end_i, end = s.points[-1]
+            return f"{verb} to {self.sp.say(s.values[i])} in {self.xl(i)}, {back} to {self.sp.say(end)} by {self.xl(end_i)}"
         (i0, first), (i1, last) = s.points[0], s.points[-1]
         at0, at1 = (f" in {self.xl(i0)}", f" in {self.xl(i1)}") if with_x else ("", "")
         net = s.net_direction
@@ -434,10 +497,24 @@ class Reasoner:
             text = f"It {self.brief_shape(readable[0])}."
         else:
             text = "; ".join(f"{s.name} {self.brief_shape(s)}" for s in readable[:3]) + "."
+        text += "".join(f" {clause}" for clause in self.missing_clauses(readable))
         if self.low_confidence:
             warning = "Values are approximate."
             text = f"{warning} {text}" if style == "uncertainty_first" else f"{text} {warning}"
         return Overview(text=text, caveats=self.caveats())
+
+    def missing_clauses(self, readable: list[SeriesFacts]) -> list[str]:
+        """e.g. '2020 could not be read.' - up to 3 labels, then 'and N more'."""
+        clauses = []
+        for s in readable:
+            if not s.missing:
+                continue
+            labels = [self.xl(i) for i in s.missing]
+            if len(labels) > 3:
+                labels = labels[:3] + [f"{len(labels) - 3} more"]
+            text = f"{'For ' + s.name + ', ' if self.multi else ''}{join_words(labels)} could not be read."
+            clauses.append(text[0].upper() + text[1:])
+        return clauses
 
     # exploration
 
@@ -463,6 +540,7 @@ class Reasoner:
         if max_idx == min_idx:
             max_idx, min_idx = set(), set()
 
+        kinds = self.point_kinds(s, max_idx, min_idx)
         points = []
         for i, v in enumerate(s.values):
             label = self.xl(i)
@@ -471,7 +549,7 @@ class Reasoner:
                 points.append(PointInsight(
                     index=i, x=label, value=None, normalised=None, delta=None, changeStrength=None,
                     direction="unknown", isMax=False, isMin=False, isTurningPoint=False,
-                    lowConfidence=True, readout=f"{label}: unreadable.",
+                    lowConfidence=True, readout=f"{label}: unreadable.", explain=self.explain(s, i, []),
                 ))
                 continue
 
@@ -499,19 +577,20 @@ class Reasoner:
                 changeStrength=None if strength is None else round(strength, 4),
                 direction=direction, isMax=i in max_idx, isMin=i in min_idx,
                 isTurningPoint=i in turn_kind, lowConfidence=self.low_confidence,
-                readout=f"{label}: {self.sp.num(v)}{tag}.",
+                readout=f"{label}: {self.sp.num(v)}{tag}.", explain=self.explain(s, i, kinds.get(i, [])),
             ))
         return SeriesInsight(
             name=s.name, intro=intro, points=points, trace=self.trace(s),
-            interestPoints=self.interest_points(s, max_idx, min_idx),
+            interestPoints=self.interest_points(s, kinds),
         )
 
     # explore page: 'Next point' stops and 'Explain' texts
 
-    def interest_points(self, s: SeriesFacts, max_idx: set[int], min_idx: set[int]) -> list[InterestPoint]:
-        if s.empty:
-            return []
+    def point_kinds(self, s: SeriesFacts, max_idx: set[int], min_idx: set[int]) -> dict[int, list[str]]:
+        """Why each landmark point matters: start, max, min, peak, low, end."""
         kinds: dict[int, list[str]] = {}
+        if s.empty:
+            return kinds
         kinds.setdefault(s.points[0][0], []).append("start")
         for i in sorted(max_idx):
             kinds.setdefault(i, []).append("max")
@@ -521,10 +600,22 @@ class Reasoner:
             kinds.setdefault(i, []).append(kind if kind == "peak" else "low")
         if len(s.points) > 1:
             kinds.setdefault(s.points[-1][0], []).append("end")
+        return kinds
+
+    def interest_points(self, s: SeriesFacts, kinds: dict[int, list[str]]) -> list[InterestPoint]:
+        """Stops for 'Next point'. At most MAX_STOPS: the least prominent peaks and lows
+        go first; start, end, max and min always stay."""
+        keep = set(kinds)
+        optional = sorted(
+            (leg, i) for leg, (i, _) in zip(s.leg_sizes(s.turns), s.turns)
+            if set(kinds[i]) <= {"peak", "low"}
+        )
+        for _, i in optional[:max(0, len(keep) - MAX_STOPS)]:
+            keep.discard(i)
 
         n = len(s.values)
         stops = []
-        for i in sorted(kinds):
+        for i in sorted(keep):
             v = s.values[i]
             stops.append(InterestPoint(
                 index=i, x=self.xl(i), value=v,
@@ -534,13 +625,27 @@ class Reasoner:
             ))
         return stops
 
+    def change_from_previous(self, s: SeriesFacts, i: int) -> str:
+        """e.g. 'up 4.4 percentage points from 2019', against the last readable point."""
+        prev = next((j for j in range(i - 1, -1, -1) if s.values[j] is not None), None)
+        if prev is None:
+            return ""
+        delta = s.values[i] - s.values[prev]
+        if s.direction(delta) == "flat":
+            return f"about the same as {self.xl(prev)}"
+        return f"{'up' if delta > 0 else 'down'} {self.sp.change(abs(delta))} from {self.xl(prev)}"
+
     def explain(self, s: SeriesFacts, i: int, kinds: list[str]) -> str:
-        """Coordinates, then why the point matters, e.g. '2020, 8.1 percent. The highest point; after this it falls.'"""
+        """Coordinates, why the point matters, the change and what comes next, e.g.
+        '2020, 8.1 percent. The highest point, up 4.4 percentage points from 2019; after this it falls.'"""
+        if s.values[i] is None:
+            return f"{self.xl(i)} could not be read."
+        readable = " readable" if s.missing else ""
         what = []
         if "max" in kinds:
-            what.append("the highest point")
+            what.append(f"the highest{readable} point")
         elif "min" in kinds:
-            what.append("the lowest point")
+            what.append(f"the lowest{readable} point")
         if "peak" in kinds and "max" not in kinds:
             what.append("a peak")
         if "low" in kinds and "min" not in kinds:
@@ -549,16 +654,19 @@ class Reasoner:
             what.append("the start of the graph")
         if "end" in kinds:
             what.append("the end of the graph")
-        text = f"{self.xl(i)}, {self.sp.say(s.values[i])}."
-        if what:
-            label = join_words(what)
-            text += f" {label[0].upper()}{label[1:]}"
-            if "peak" in kinds:
-                text += "; after this it falls"
-            elif "low" in kinds:
-                text += "; after this it rises"
-            text += "."
-        return text
+        text = f"{self.xl(i)}, {self.sp.say(s.values[i])}"
+        change = self.change_from_previous(s, i)
+        if not what:
+            return f"{text}, {change}." if change else f"{text}."
+        label = join_words(what)
+        text += f". {label[0].upper()}{label[1:]}"
+        if change:
+            text += f", {change}"
+        if "peak" in kinds:
+            text += "; after this it falls"
+        elif "low" in kinds:
+            text += "; after this it rises"
+        return text + "."
 
     # ring trace
 

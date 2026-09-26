@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from app.reasoning import fmt_number, reason
 from app.schemas import ExtractionResponse, GraphData
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
+FALLBACK = Path(__file__).parent.parent.parent / "contracts" / "examples" / "reason-unemployment.json"
 
 
 def load(name: str) -> ExtractionResponse:
@@ -31,13 +33,13 @@ def series(result, name):
 def test_unemployment_overview_is_shape_only():
     # Person 3's describeAxes already speaks type, title and axes just before this
     r = run("unemployment_us")
-    assert r.overview.text == "It spikes to 8.1 percent in 2020, then falls back."
+    assert r.overview.text == "It spikes to 8.1 percent in 2020, then falls back to 4 percent by 2024."
     assert "axis" not in r.overview.text.lower() and "Across" not in r.overview.text
 
 
 def test_unemployment_brief_answers():
     r = run("unemployment_us")
-    assert r.answers.trend.answer == "Spikes to 8.1 percent in 2020, then falls back."
+    assert r.answers.trend.answer == "Spikes to 8.1 percent in 2020, then falls back to 4 percent by 2024."
     assert r.answers.max.answer == "Highest: 8.1 percent, in 2020."
     assert r.answers.changes.answer == "Low in 2019, peak in 2020, low in 2023."
     assert r.answers.compare.answer == "This graph has only one series, so there is nothing to compare."
@@ -51,7 +53,9 @@ def test_unemployment_interest_points_for_next_point_button():
         ("2023", ["min", "low"]), ("2024", ["end"]),
     ]
     peak = s.interestPoints[2]
-    assert peak.explain == "2020, 8.1 percent. The highest point; after this it falls."
+    assert peak.explain == (
+        "2020, 8.1 percent. The highest point, up 4.4 percentage points from 2019; after this it falls."
+    )
     assert peak.xFraction == 0.5 and peak.normalised == 1
 
 
@@ -72,10 +76,86 @@ def test_readouts_are_brief():
     assert points[3].readout == "2019: 3.7, low point."
 
 
+def test_every_point_has_an_explain_with_the_change():
+    s = run("unemployment_us").series[0]
+    assert s.points[1].explain == "2017, 4.4 percent, down 0.5 percentage points from 2016."
+    assert s.points[0].explain == "2016, 4.9 percent. The start of the graph."
+    assert s.points[-1].explain == "2024, 4 percent. The end of the graph, up 0.4 percentage points from 2023."
+    by_index = {p.index: p.explain for p in s.points}
+    assert all(stop.explain == by_index[stop.index] for stop in s.interestPoints)
+
+
+def test_unemployment_with_2020_unreadable():
+    e = load("unemployment_us")
+    e.graph.series[0].values[4] = None
+    r = reason(e.graph, e.fieldConfidence)
+    assert r.overview.text == (
+        "It spikes to 5.4 percent in 2021, then falls back to 4 percent by 2024. 2020 could not be read."
+    )
+    assert any("2020" in c for c in r.overview.caveats)
+    points = r.series[0].points
+    assert points[4].explain == "2020 could not be read."
+    assert points[5].explain.startswith("2021, 5.4 percent. The highest readable point, up 1.7 percentage points from 2019")
+    assert "lowest readable point" in points[7].explain
+
+
+def test_missing_clause_lists_up_to_three_labels():
+    r = reason(graph([[1, None, None, 3, None, None, 6]]))
+    assert r.overview.text.endswith("M2, M3, M5 and 1 more could not be read.")
+
+
+# --- big landmarks only ---
+
+
+def test_small_wobble_adds_no_stops():
+    e = load("unemployment_us")
+    e.graph.series[0].values = [4.9, 4.3, 4.4, 3.7, 8.1, 5.4, 3.7, 3.6, 4.0]
+    r = reason(e.graph, e.fieldConfidence)
+    s = r.series[0]
+    assert [(p.x, p.kinds) for p in s.interestPoints] == [
+        ("2016", ["start"]), ("2019", ["low"]), ("2020", ["max", "peak"]),
+        ("2023", ["min", "low"]), ("2024", ["end"]),
+    ]
+    assert {p.x for p in s.points if p.isTurningPoint} == {"2019", "2020", "2023"}
+    assert r.answers.changes.answer == "Low in 2019, peak in 2020, low in 2023."
+    assert [t.toIndex for t in s.trace if t.endsAtTurningPoint] == [3, 4, 7]
+
+
+def test_noisy_series_is_capped_at_six_stops():
+    r = reason(graph([[5, 8, 4, 9.5, 3, 7, 2, 8, 4, 9, 1, 6]]))
+    stops = r.series[0].interestPoints
+    assert len(stops) <= 6
+    kinds = {k for p in stops for k in p.kinds}
+    assert {"start", "end", "max", "min"} <= kinds
+
+
+# --- speech precision ---
+
+
+def test_spoken_numbers_use_one_decimal_when_range_is_wide():
+    r = reason(graph([[4.85, 3.61, 8.05, 5.27]], unit="%"))
+    s = r.series[0]
+    spoken = [r.overview.text, s.intro] + [a.answer for a in (r.answers.trend, r.answers.max, r.answers.changes)]
+    spoken += [p.readout for p in s.points] + [p.explain for p in s.points] + [p.explain for p in s.interestPoints]
+    assert not [text for text in spoken if re.search(r"\d\.\d\d", text)]
+    assert s.points[1].readout == "M2: 3.6, lowest."
+    assert s.points[0].value == 4.85  # raw fields keep full precision
+
+
+# --- fallback mode ---
+
+
+def test_saved_fallback_response_is_current():
+    # contracts/examples/reason-unemployment.json is what Person 4's fallback mode loads
+    saved = json.loads(FALLBACK.read_text(encoding="utf-8"))
+    assert saved == run("unemployment_us").model_dump(mode="json")
+
+
 # --- two-series graph (compare kept, not shown) ---
 
 
 def test_italy_japan_turning_points_and_changes():
+    # Italy's 2012 peak is only 2 above 2011 but stays: it is the series max
     r = run("mobile_italy_japan")
     italy = series(r, "Italy")
     assert {p.x for p in italy.points if p.isTurningPoint} == {"2012", "2020"}
@@ -264,3 +344,7 @@ def test_chart_aspect_changes_ring_angles():
     body = {"graph": e.graph.model_dump(), "chartAspect": 1.5}
     assert client.post("/reason", json=body).json()["series"][0]["trace"][3]["angle"] == tall
     assert client.post("/reason", json={**body, "chartAspect": -1}).status_code == 422
+
+
+def test_single_point_overview():
+    assert reason(graph([[7]])).overview.text == "It has only one value, 7 degrees Celsius."
