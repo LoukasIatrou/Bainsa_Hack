@@ -132,6 +132,56 @@ def test_fmt_number():
     assert fmt_number(12.34) == "12.3"
     assert fmt_number(-3.5) == "minus 3.5"
     assert fmt_number(0.25) == "0.25"
+    assert fmt_number(2_250_000, 0) == "2,250,000"
+    assert fmt_number(100.9, 1) == "100.9"
+
+
+def graph(values, x=None, unit="°C", title="Test", names=None):
+    names = names or [f"S{i}" for i in range(len(values))]
+    return GraphData(
+        graphType="line", title=title,
+        xAxis={"label": "Month", "values": x or [f"M{i + 1}" for i in range(len(values[0]))]},
+        yAxis={"label": "Temperature", "unit": unit},
+        series=[{"name": n, "values": v} for n, v in zip(names, values)], confidence=0.9,
+    )
+
+
+@pytest.mark.parametrize("unit", ["°C", "° C", "ºC", "Â°C", "degC"])
+def test_unit_variants_are_spoken(unit):
+    from app.reasoning import spoken_unit
+    assert spoken_unit(unit) == "degrees Celsius"
+
+
+def test_rounding_keeps_data_precision():
+    r = reason(graph([[100, 100.5, 100.2, 100.9, 100.1]]))
+    assert "100.9" in r.answers.max.answer
+    assert "from 100 to 100 " not in r.overview.text
+
+
+def test_singular_unit_and_title_punctuation():
+    r = reason(graph([[1, 2, 3]], title="Sales by month."))
+    assert r.series[0].points[0].readout.startswith("M1, 1 degree Celsius.")
+    assert "titled Sales by month," in r.overview.text
+
+
+def test_length_mismatch_caveat():
+    r = reason(graph([[1, 2, 3, 4, 5]], x=["a", "b", "c"]))
+    assert any("misaligned" in c for c in r.overview.caveats)
+
+
+def test_ties_grouped_by_series():
+    r = reason(graph([[1, 9, 1, 9], [9, 1, 9, 1]], names=["A", "B"]))
+    assert "A in M2 and M4; B in M1 and M3" in r.answers.max.answer
+
+
+@pytest.mark.parametrize("values", [[[7]], [[None, None]], [[]], [[1, 2], [None, None]]])
+def test_degenerate_inputs_do_not_crash(values):
+    x = ["a"] * len(values[0]) if values[0] else []
+    r = reason(GraphData(
+        graphType="line", title="T", xAxis={"label": "x", "values": x}, yAxis={"label": "y"},
+        series=[{"name": f"S{i}", "values": v} for i, v in enumerate(values)], confidence=0.9,
+    ))
+    assert r.overview.text
 
 
 # --- LLM guard ---

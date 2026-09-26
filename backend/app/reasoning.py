@@ -41,19 +41,42 @@ def spoken_unit(unit: str | None) -> str:
     if not unit:
         return ""
     unit = unit.strip()
-    return _SPOKEN_UNITS.get(unit, unit)
+    # tolerate mojibake ('Â°C') and OCR variants ('° C', 'ºC', 'degC')
+    key = unit.replace("Â", "").replace("º", "°").replace(" ", "")
+    key = {"degC": "°C", "degF": "°F"}.get(key, key)
+    return _SPOKEN_UNITS.get(key, unit)
 
 
-def fmt_number(value: float) -> str:
-    """Round for speech: 159, 12.5, 0.25. No scientific notation, no '-'."""
+def data_decimals(values: list[float]) -> int:
+    """Decimal places the data itself uses (capped at 2), so rounding never hides a change."""
+    places = 0
+    for v in values:
+        while places < 2 and round(v, places) != v:
+            places += 1
+    return places
+
+
+def fmt_number(value: float, decimals: int | None = None) -> str:
+    """Round for speech: 159, 12.5, 2,250,000. No scientific notation, no '-'.
+
+    Without `decimals`, precision falls back to the value's magnitude.
+    """
     magnitude = abs(value)
-    decimals = 0 if magnitude >= 100 else 1 if magnitude >= 1 else 2
-    text = f"{magnitude:.{decimals}f}"
+    if decimals is None:
+        decimals = 0 if magnitude >= 100 else 1 if magnitude >= 1 else 2
+    text = f"{magnitude:,.{decimals}f}"
     if decimals:
         text = text.rstrip("0").rstrip(".")
     if text == "0":
         return "0"
     return f"minus {text}" if value < 0 else text
+
+
+def plural(n: int, word: str) -> str:
+    return f"{n} {word}" if n == 1 else f"{n} {word}s"
+
+
+_SINGULAR_UNITS = {"degrees": "degree", "dollars": "dollar", "euros": "euro", "pounds": "pound"}
 
 
 def join_words(items: list[str]) -> str:
@@ -77,14 +100,22 @@ def lower_first(text: str) -> str:
 class Speaker:
     unit: str
     approx: bool
+    decimals: int = 0  # precision of the source data
 
-    def num(self, value: float) -> str:
-        """A value without its unit, e.g. 'about 145'."""
-        return ("about " if self.approx else "") + fmt_number(value)
+    def num(self, value: float, extra: int = 0) -> str:
+        """A value without its unit, e.g. 'about 145'. `extra` adds precision for averages."""
+        return ("about " if self.approx else "") + fmt_number(value, min(2, self.decimals + extra))
 
-    def say(self, value: float) -> str:
-        """A value with its unit, e.g. '12 degrees Celsius'."""
-        return self.num(value) + (f" {self.unit}" if self.unit else "")
+    def say(self, value: float, extra: int = 0) -> str:
+        """A value with its unit, e.g. '12 degrees Celsius', '1 degree Celsius'."""
+        text = self.num(value, extra)
+        if not self.unit:
+            return text
+        unit = self.unit
+        if text.split()[-1] == "1":
+            first, _, rest = unit.partition(" ")
+            unit = " ".join(filter(None, [_SINGULAR_UNITS.get(first, first), rest]))
+        return f"{text} {unit}"
 
 
 # --- analysis ---
@@ -174,9 +205,8 @@ class Reasoner:
         self.graph = graph
         self.x = graph.xAxis.values
         self.low_confidence = is_low_confidence(graph, field_confidence)
-        self.sp = Speaker(spoken_unit(graph.yAxis.unit), self.low_confidence)
-
         all_values = [v for s in graph.series for v in s.values if v is not None]
+        self.sp = Speaker(spoken_unit(graph.yAxis.unit), self.low_confidence, data_decimals(all_values))
         self.lo = min(all_values) if all_values else None
         self.hi = max(all_values) if all_values else None
         self.span = (self.hi - self.lo) if all_values else 0.0
@@ -199,8 +229,16 @@ class Reasoner:
             elif s.missing:
                 labels = join_words([self.xl(i) for i in s.missing])
                 owner = f"{s.name} value" if self.multi else "value"
-                plural = "s" if len(s.missing) > 1 else ""
-                notes.append(f"The {owner}{plural} for {labels} could not be read, so {'they are' if plural else 'it is'} left out.")
+                many = len(s.missing) > 1
+                notes.append(
+                    f"The {owner}{'s' if many else ''} for {labels} could not be read, "
+                    f"so {'they are' if many else 'it is'} left out."
+                )
+            if len(s.values) != len(self.x):
+                notes.append(
+                    f"{s.name} has {plural(len(s.values), 'value')} but the x-axis has "
+                    f"{plural(len(self.x), 'label')}, so some positions may be misaligned."
+                )
         return notes
 
     # shapes
@@ -220,7 +258,9 @@ class Reasoner:
             if kind == "peak":
                 return f"rises until {self.xl(idx)}, then falls"
             return f"falls until {self.xl(idx)}, then rises"
-        verb = {"up": "rises overall", "down": "falls overall", "flat": "ends roughly where it started"}[net]
+        if net == "flat":
+            return f"ends roughly where it started, at {self.sp.num(last)}, changing direction {times_word(len(s.turns))}"
+        verb = "rises overall" if net == "up" else "falls overall"
         return f"{verb}, {span}, changing direction {times_word(len(s.turns))}"
 
     def legs(self, s: SeriesFacts) -> str:
@@ -275,13 +315,17 @@ class Reasoner:
             return Answer(answer="No values could be read, so the maximum is unknown.", caveats=self.caveats())
         top = self.hi
         hits = [(s, i) for s in readable for i in s.extreme_indices(True) if s.values[i] == top]
-        where = join_words(
-            [f"{s.name} in {self.xl(i)}" if self.multi else self.xl(i) for s, i in hits]
-        )
+        groups = {}  # series name -> labels, so ties read "A in M2, M4 and M6; B in M1"
+        for s, i in hits:
+            groups.setdefault(s.name, []).append(self.xl(i))
+        if self.multi:
+            where = "; ".join(f"{name} in {join_words(labels)}" for name, labels in groups.items())
+        else:
+            where = join_words(next(iter(groups.values())))
         verb = "reached by" if self.multi else "in"
         sentences = [f"The highest value is {self.sp.say(top)}, {verb} {where}."]
         if len(hits) > 1:
-            sentences[0] = f"The highest value, {self.sp.say(top)}, is reached {len(hits)} times: {where}."
+            sentences[0] = f"The highest value, {self.sp.say(top)}, is reached {times_word(len(hits))}: {where}."
         if self.multi:
             for s in readable:
                 if any(h[0] is s for h in hits):
@@ -358,7 +402,7 @@ class Reasoner:
             other = b.name if lead == a.name else a.name
             mean_gap = sum(g for g, _ in gaps) / len(gaps)
             sentences.append(
-                f"{lead} is higher than {other} at every point, by {self.sp.say(mean_gap)} on average."
+                f"{lead} is higher than {other} at every point, by {self.sp.say(mean_gap, extra=1)} on average."
             )
         elif len(runs) == 1:
             sentences.append(f"{a.name} and {b.name} are equal at every point.")
@@ -391,13 +435,14 @@ class Reasoner:
     def overview(self, style: str) -> Overview:
         g = self.graph
         readable = [s for s in self.series if not s.empty]
-        span = f" from {self.x[0]} to {self.x[-1]}" if self.x else ""
+        span = self.x_span(len(self.x))
         who = f", for {join_words([s.name for s in self.series])}" if self.multi else ""
         unit = self.sp.unit
         if unit:
             unit = f" {unit}" if unit.startswith("per ") else f" in {unit}"
+        title = g.title.strip().rstrip(".!?;:,")
         sentences = [
-            f"Line graph titled {g.title}, showing {lower_first(g.yAxis.label)}{unit}"
+            f"Line graph titled {title}, showing {lower_first(g.yAxis.label)}{unit}"
             f" by {lower_first(g.xAxis.label)}{span}{who}."
         ]
         if readable:
@@ -440,17 +485,27 @@ class Reasoner:
 
     # exploration
 
+    def x_span(self, count: int) -> str:
+        """' from 2011 to 2022', ' at 2011' for a single point, '' for none."""
+        if count == 0:
+            return ""
+        if count == 1:
+            return f" at {self.xl(0)}"
+        return f" from {self.xl(0)} to {self.xl(count - 1)}"
+
     def series_insight(self, s: SeriesFacts) -> SeriesInsight:
         count = len(s.values)
         if s.empty:
-            intro = f"{s.name}. {count} points, but no values could be read."
+            intro = f"{s.name}. {plural(count, 'point')}, but no values could be read."
+        elif len(s.points) == 1:
+            intro = f"{s.name}. Only one value: {self.sp.say(s.points[0][1])}, at {self.xl(s.points[0][0])}."
         else:
-            intro = f"{s.name}. {count} points, from {self.xl(0)} to {self.xl(count - 1)}. It {self.shape(s)}."
+            intro = f"{s.name}. {plural(count, 'point')},{self.x_span(count)}. It {self.shape(s)}."
         turn_kind = dict(s.turns)
         max_idx = set(s.extreme_indices(True)) if not s.empty else set()
         min_idx = set(s.extreme_indices(False)) if not s.empty else set()
-        # a flat series has max == min; don't call every point both
-        if max_idx == min_idx and len(s.points) > 1:
+        # a flat series or a single point has max == min; don't tag every point as both
+        if max_idx == min_idx:
             max_idx, min_idx = set(), set()
 
         points = []
