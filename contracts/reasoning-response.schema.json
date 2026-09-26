@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReasoningResponse",
+  "description": "Returned by Person 2's POST /reason (request: {graph: GraphData, fieldConfidence: FieldConfidence | null}). Everything the frontend needs in one call, so exploration and preset questions work with no further network requests. Call /reason again after any user correction.",
+  "type": "object",
+  "required": ["overview", "answers", "series", "range", "lowConfidence", "phrasing"],
+  "$defs": {
+    "answer": {
+      "type": "object",
+      "required": ["answer", "highlight", "caveats"],
+      "properties": {
+        "answer": { "type": "string", "description": "Ready-to-speak text." },
+        "highlight": {
+          "type": "array",
+          "description": "Points the answer refers to, for focusing or highlighting in the UI.",
+          "items": {
+            "type": "object",
+            "required": ["series", "index"],
+            "properties": {
+              "series": { "type": "string" },
+              "index": { "type": "integer", "description": "Index into xAxis.values." }
+            }
+          }
+        },
+        "caveats": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Uncertainty to announce, e.g. unreadable values or low confidence."
+        }
+      }
+    }
+  },
+  "properties": {
+    "overview": {
+      "type": "object",
+      "required": ["text", "caveats"],
+      "properties": {
+        "text": { "type": "string", "description": "Short spoken summary: graph type, variables, trend, key finding. Computed from the data; GraphData.summary is ignored." },
+        "caveats": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "answers": {
+      "type": "object",
+      "required": ["trend", "max", "changes", "compare"],
+      "properties": {
+        "trend": { "$ref": "#/$defs/answer" },
+        "max": { "$ref": "#/$defs/answer" },
+        "changes": { "$ref": "#/$defs/answer" },
+        "compare": { "$ref": "#/$defs/answer", "description": "With one series, answers that there is nothing to compare." }
+      }
+    },
+    "series": {
+      "type": "array",
+      "description": "One entry per series; each is explored independently.",
+      "items": {
+        "type": "object",
+        "required": ["name", "intro", "points"],
+        "properties": {
+          "name": { "type": "string" },
+          "intro": { "type": "string", "description": "Spoken when the user switches to this series." },
+          "points": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["index", "x", "value", "normalised", "delta", "changeStrength", "direction", "isMax", "isMin", "isTurningPoint", "lowConfidence", "readout"],
+              "properties": {
+                "index": { "type": "integer" },
+                "x": { "type": "string" },
+                "value": { "type": ["number", "null"], "description": "null = could not be read." },
+                "normalised": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "(value - min) / (max - min) over ALL series, so series share one pitch scale. 0.5 if every value is equal." },
+                "delta": { "type": ["number", "null"], "description": "Change from the previous point; null for the first point or when either value is missing." },
+                "changeStrength": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "|delta| / (max - min), capped at 1. 0 for the first point; null when either value is missing." },
+                "direction": { "type": "string", "enum": ["up", "down", "flat", "unknown"], "description": "Versus the previous point; moves under 2% of the value range are flat. 'flat' for the first point; 'unknown' when this or the previous value is missing." },
+                "isMax": { "type": "boolean", "description": "Highest point of this series." },
+                "isMin": { "type": "boolean", "description": "Lowest point of this series." },
+                "isTurningPoint": { "type": "boolean", "description": "The trend reverses here (peak or trough)." },
+                "lowConfidence": { "type": "boolean" },
+                "readout": { "type": "string", "description": "Ready-to-speak, e.g. 'March, 12 degrees Celsius, up 5 from February.'" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "range": {
+      "type": "object",
+      "required": ["min", "max"],
+      "properties": {
+        "min": { "type": ["number", "null"] },
+        "max": { "type": ["number", "null"] }
+      }
+    },
+    "lowConfidence": { "type": "boolean", "description": "graph.confidence or fieldConfidence.series below 0.6; numbers are then spoken as 'about ...'." },
+    "phrasing": { "type": "string", "enum": ["template", "llm"], "description": "Whether texts were reworded by Gemini (USE_LLM=1) or are the deterministic templates." }
+  }
+}

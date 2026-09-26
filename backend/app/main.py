@@ -2,11 +2,13 @@ import json
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, UploadFile
+from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from .extraction import extract_graph
-from .schemas import ExtractionResponse
+from .phrasing_llm import rephrase
+from .reasoning import reason
+from .schemas import ExtractionResponse, ReasoningResponse, ReasonRequest
 
 load_dotenv()
 
@@ -44,3 +46,20 @@ def extract_mock(scenario: str = "ok") -> ExtractionResponse:
     fixture_path = _FIXTURES_DIR / f"{scenario}.json"
     data = json.loads(fixture_path.read_text())
     return ExtractionResponse(**data)
+
+
+@app.post("/reason", response_model=ReasoningResponse)
+def reason_endpoint(request: ReasonRequest) -> ReasoningResponse:
+    """Everything the frontend needs in one call: overview, the four preset
+    answers and per-point exploration data. Call again after any correction."""
+    return rephrase(reason(request.graph, request.fieldConfidence))
+
+
+@app.get("/reason/mock", response_model=ReasoningResponse)
+def reason_mock(scenario: str = "mobile_italy_japan") -> ReasoningResponse:
+    """/reason run on a fixture from fixtures/, for building the frontend."""
+    fixture_path = _FIXTURES_DIR / f"{scenario}.json"
+    extraction = ExtractionResponse(**json.loads(fixture_path.read_text(encoding="utf-8")))
+    if extraction.graph is None:
+        raise HTTPException(status_code=400, detail=f"Fixture '{scenario}' has no graph.")
+    return rephrase(reason(extraction.graph, extraction.fieldConfidence))
