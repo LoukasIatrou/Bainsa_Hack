@@ -6,4 +6,8 @@ import { AudioHapticEngine } from '../../../audio-haptics/src/index'
 
 export const engine = new AudioHapticEngine()
 
+// Dev server only (stripped from production builds): lets headless checks read engine events
+// (haptic patterns, guidance) from the page.
+if (import.meta.env.DEV) Object.assign(window, { __engine: engine })
+
 export * from '../../../audio-haptics/src/index'

@@ -52,8 +52,14 @@ export function explainPoint(index: number): void {
   const text = reasoning?.series?.find((s) => s.name === series.name)?.points.find((p) => p.index === index)?.explain
   engine.explore.focus(index, { announce: false })
   if (text) engine.speech.speak(text, 'interrupt')
-  else engine.explain()
+  else originalExplain()
 }
+
+// Long press in graph mode calls the engine's explain(), which speaks Person 3's own template
+// ("This is the highest point."). Route it to the same /reason explanation as arriving at a point
+// and the menu's Explain, for the point under the finger (his explain() picks the same index).
+const originalExplain = engine.explain.bind(engine)
+engine.explain = () => explainPoint(engine.guidance.getCurrentIndex() ?? engine.explore.currentPoint)
 
 // Switch modes. Person 3's own graph-mode announcement says "Two-finger tap to return to the
 // menu", which is no longer true (the menu is double-tap only), so it is replaced here.
@@ -85,7 +91,11 @@ export function runNext(): void {
 export function runOverview(): void {
   stopWalk()
   engine.setMode('graph')
+  // Overview always starts at the first point; if that is behind the finger, his engine says
+  // "lift your finger and start again" - the ring must reset and stay quiet the same way.
+  const back = engine.guidance.needsRestart(0)
   engine.startOverview()
+  if (back) restartListeners.forEach((listener) => listener(0))
   for (const caveat of engine.getReasoning()?.overview.caveats ?? []) engine.speech.speak(caveat, 'normal')
 }
 
