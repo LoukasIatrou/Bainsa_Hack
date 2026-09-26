@@ -1,0 +1,35 @@
+{
+  "status": "ok",
+  "graph": {
+    "graphType": "line",
+    "title": "Mobile phone subscriptions, Italy vs Japan",
+    "xAxis": {
+      "label": "Year",
+      "values": ["2011", "2012", "2013", "2014", "2015", "2016", "2017", "2018", "2019", "2020", "2021", "2022"]
+    },
+    "yAxis": {
+      "label": "Mobile subscriptions",
+      "unit": "per 100 people"
+    },
+    "series": [
+      {
+        "name": "Italy",
+        "values": [159, 161, 160, 148, 145, 142, 139, 138, 132, 129, 131, 132]
+      },
+      {
+        "name": "Japan",
+        "values": [104, 110, 116, 124, 126, 131, 136, 142, 147, 154, 160, 169]
+      }
+    ],
+    "summary": null,
+    "confidence": 0.9
+  },
+  "fieldConfidence": {
+    "graphType": 0.98,
+    "title": 0.95,
+    "xAxis": 0.95,
+    "yAxis": 0.9,
+    "series": 0.88
+  },
+  "message": null
+}
