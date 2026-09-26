@@ -1,9 +1,9 @@
 # Bainsa Hack — Graph Accessibility Copilot
 
 Point a phone camera at a line graph. The app reads it, speaks a summary, and lets a blind or
-low-vision user explore the data point by point through speech, sonification, and a vibrating
-"ring" — simulated with the phone's own vibration motor (`navigator.vibrate()`), since there is
-no physical ring in this build. Speech uses the browser's built-in `SpeechSynthesis`.
+low-vision user explore the data point by point through speech, sonification, and a haptic
+"ring" — simulated in this build rather than physical hardware. Speech uses the browser's
+built-in `SpeechSynthesis`.
 
 Scope: **line graphs only**. Other chart types are future scope.
 
@@ -11,7 +11,7 @@ Scope: **line graphs only**. Other chart types are future scope.
 
 | Path | Owner | What it is |
 | --- | --- | --- |
-| `contracts/` | shared | JSON schemas every workstream conforms to (`GraphData`, `ExtractionResponse`, `ReasoningResponse`) plus [`haptic-patterns.md`](contracts/haptic-patterns.md), the single source of truth for what each vibration pattern means. |
+| `contracts/` | shared | JSON schemas every workstream conforms to (`GraphData`, `ExtractionResponse`, `ReasoningResponse`) plus [`haptic-patterns.md`](contracts/haptic-patterns.md), the single source of truth for what each haptic pattern means. |
 | `backend/` | Person 1 & 2 | FastAPI service. `POST /extract` (vision) and `POST /reason` (reasoning). |
 | `frontend/` | Person 4 | React + TypeScript + Vite app — the actual demo. |
 | `audio-haptics/` | Person 3 | `@bainsa/audio-haptics` — speech, sonification and haptic engine. Imported by the frontend directly from source (no build step, zero runtime dependencies). Also ships its own standalone test harness. |
@@ -129,9 +129,6 @@ meanings: [`contracts/haptic-patterns.md`](contracts/haptic-patterns.md).
 
 ## Honesty and scope
 
-- Vibration is **off by default** — `navigator.vibrate()` is silently ignored on many Android
-  builds and desktop browsers with no way to detect that, so the demo never claims the phone is
-  buzzing unless it's opted in and on an actual phone.
 - Uncertainty is surfaced, never hidden: low-confidence fields are flagged and unreadable values
   stay `null` rather than being guessed.
 - Three execution modes exist for the demo — live capture, a known/uploaded graph, and a cached
