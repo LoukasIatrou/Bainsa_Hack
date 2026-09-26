@@ -602,6 +602,12 @@ export class AudioHapticEngine {
     speechUsable: boolean;
     speechVoice: string | null;
     vibrationApi: boolean;
+    /** What navigator.vibrate() returned on the test pulse. */
+    vibrateAccepted: boolean | null;
+    /** Whether the page has the user activation vibrate() requires. */
+    userActivated: boolean | null;
+    secureContext: boolean;
+    pageVisible: boolean;
     activeTransports: string[];
     problems: string[];
   }> {
@@ -659,6 +665,36 @@ export class AudioHapticEngine {
       problems.push('No Vibration API: haptics fall back to the simulator and audio buzz.');
     }
 
+    // Fire a real pattern so the return value below means something.
+    if (vibrationApi) this.haptics.play('double');
+    const vibrateAccepted = this.haptics.lastVibrateResult;
+
+    const activation = (navigator as unknown as {
+      userActivation?: { isActive: boolean; hasBeenActive: boolean };
+    }).userActivation;
+    const userActivated = activation ? activation.hasBeenActive : null;
+    const pageVisible = typeof document === 'undefined' || document.visibilityState === 'visible';
+    const secureContext = typeof window !== 'undefined' && window.isSecureContext;
+
+    if (vibrationApi && vibrateAccepted === false) {
+      problems.push(
+        'navigator.vibrate() returned FALSE -- the request was rejected. Usually '
+        + 'no user activation yet: tap the page once, then try again.',
+      );
+    }
+    if (vibrationApi && userActivated === false) {
+      problems.push('The page has no user activation yet. Tap it once before testing vibration.');
+    }
+    if (vibrationApi && vibrateAccepted === true) {
+      problems.push(
+        'vibrate() was ACCEPTED. If nothing moved: this is a laptop (the API is a '
+        + 'no-op there), or on Android check silent mode, Do Not Disturb, battery '
+        + 'saver, and Settings > Sound > Vibration. An accepted call is not proof '
+        + 'the motor ran -- the API never reports that.',
+      );
+    }
+    if (!pageVisible) problems.push('Page is not visible; vibration is suppressed in the background.');
+
     return {
       audioUnlocked,
       audioSignalLevel: Number(level.toFixed(5)),
@@ -667,6 +703,10 @@ export class AudioHapticEngine {
       speechUsable: this.speech.usable,
       speechVoice: this.speech.voiceName,
       vibrationApi,
+      vibrateAccepted,
+      userActivated,
+      secureContext,
+      pageVisible,
       activeTransports: this.haptics.getActiveTransports(),
       problems,
     };

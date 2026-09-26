@@ -69,6 +69,18 @@ export function patternDuration(spec: HapticPatternSpec): number {
 export class VibrationTransport implements HapticTransport {
   readonly id = 'vibration';
 
+  /**
+   * What the last `navigator.vibrate()` call returned, or null if never called.
+   *
+   * The API returns a boolean and most code throws it away. `false` means the
+   * request was rejected outright -- no user activation yet, or the pattern was
+   * invalid. `true` only means Chrome accepted it, NOT that the motor moved:
+   * silent mode, Do Not Disturb, battery saver and a disabled system haptics
+   * setting all swallow an accepted request. Desktop returns true and does
+   * nothing at all.
+   */
+  lastResult: boolean | null = null;
+
   get available(): boolean {
     return typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function';
   }
@@ -76,9 +88,10 @@ export class VibrationTransport implements HapticTransport {
   play(spec: HapticPatternSpec): void {
     if (!this.available) return;
     try {
-      navigator.vibrate(spec.timings);
+      this.lastResult = navigator.vibrate(spec.timings);
     } catch {
       // Blocked without user activation; the other transports still fire.
+      this.lastResult = false;
     }
   }
 
@@ -170,6 +183,12 @@ export class Haptics {
    */
   get vibrationRequested(): boolean {
     return this.getActiveTransports().includes('vibration');
+  }
+
+  /** What the last navigator.vibrate() call returned. See VibrationTransport. */
+  get lastVibrateResult(): boolean | null {
+    const t = this.transports.find((x) => x.id === 'vibration');
+    return t instanceof VibrationTransport ? t.lastResult : null;
   }
 
   setEnabled(id: string, enabled: boolean): void {

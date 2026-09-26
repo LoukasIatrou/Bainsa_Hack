@@ -144,7 +144,43 @@ $('unlock').addEventListener('click', async () => {
   engine.playPattern('short');
 });
 
-$('testPattern').addEventListener('click', () => engine.playPattern('double'));
+$('testPattern').addEventListener('click', () => {
+  engine.playPattern('double');
+  const out = $('diagnostic');
+  out.style.display = 'block';
+  const accepted = engine.haptics.lastVibrateResult;
+  out.textContent = [
+    `vibrate() returned  ${accepted === null ? 'not called' : accepted ? 'TRUE (accepted)' : 'FALSE (rejected)'}`,
+    `Vibration API       ${typeof navigator.vibrate === 'function' ? 'present' : 'MISSING'}`,
+    '',
+    accepted === false
+      ? 'Rejected. Tap the page once first, then press again.'
+      : accepted === true
+        ? 'Chrome accepted it. If nothing moved, the phone is swallowing it:\n'
+          + '  - silent mode / Do Not Disturb\n'
+          + '  - battery saver\n'
+          + '  - Settings > Sound & vibration > Vibration\n'
+          + '  - or this is a laptop, where the API does nothing at all'
+        : 'The API is missing. iOS never has it.',
+  ].join('\n');
+});
+
+// Big, obvious per-pattern buttons -- a laptop cannot test any of this.
+const phoneRow = document.getElementById('phoneVibeRow');
+if (phoneRow) {
+  for (const name of Object.keys(HAPTIC_PATTERNS) as HapticPatternName[]) {
+    const b = document.createElement('button');
+    b.textContent = name;
+    b.style.flex = '1 1 auto';
+    b.addEventListener('click', () => {
+      engine.playPattern(name);
+      const r = engine.haptics.lastVibrateResult;
+      $('phoneVibeNote').textContent =
+        `${name}: vibrate() -> ${r === null ? 'not called' : r ? 'accepted' : 'REJECTED'}`;
+    });
+    phoneRow.append(b);
+  }
+}
 
 $('speakTest').addEventListener('click', async () => {
   const out = $('diagnostic');
@@ -178,6 +214,10 @@ $('diagnose').addEventListener('click', async () => {
   const yn = (ok: boolean) => (ok ? 'YES' : 'NO');
   out.textContent = [
     `Audio unlocked        ${yn(r.audioUnlocked)}`,
+    `Secure context        ${yn(r.secureContext)}`,
+    `Page visible          ${yn(r.pageVisible)}`,
+    `User activation       ${r.userActivated === null ? 'unknown' : yn(r.userActivated)}`,
+    `vibrate() accepted    ${r.vibrateAccepted === null ? 'not called' : yn(r.vibrateAccepted)}`,
     `Engine emitting sound ${yn(r.audioProducingSound)}   (signal level ${r.audioSignalLevel})`,
     `Speech voices         ${r.speechVoices}`,
     `Voice chosen          ${r.speechVoice ?? '(none)'}`,
