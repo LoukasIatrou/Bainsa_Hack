@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { announce } from './speech'
 
 interface CaptureProps {
   onCapture: (image: Blob) => void
@@ -56,7 +57,13 @@ export function Capture({ onCapture }: CaptureProps) {
     canvas.width = video.videoWidth
     canvas.height = video.videoHeight
     canvas.getContext('2d')?.drawImage(video, 0, 0)
-    canvas.toBlob((blob) => blob && onCapture(blob), 'image/jpeg', 0.9)
+    canvas.toBlob((blob) => {
+      if (!blob) return
+      // Immediate confirmation at the moment of the tap, before the network round-trip -
+      // a blind user has no visual cue that the tap registered otherwise.
+      announce('Graph captured. Processing.')
+      onCapture(blob)
+    }, 'image/jpeg', 0.9)
   }
 
   return (
