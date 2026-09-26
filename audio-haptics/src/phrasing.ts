@@ -199,8 +199,34 @@ export function countUnreadable(graph: GraphData): number {
 }
 
 /**
+ * The graph's shape in words -- highs, lows and how many points.
+ *
+ * Used when no summary is available from either the extraction or /reason, so
+ * the overview never falls silent. Deliberately says nothing about sound: the
+ * demo does not sonify, and describing a channel that is not playing would be
+ * a lie about what the user is hearing.
+ */
+export function describeShape(graph: GraphData, seriesIndices?: number[]): string {
+  const indices = seriesIndices ?? graph.series.map((_, i) => i);
+  const sentences: string[] = [];
+
+  for (const i of indices) {
+    const series = graph.series[i];
+    if (!series) continue;
+    sentences.push(describeSeriesShape(graph, series));
+  }
+
+  if (sentences.length === 0) return 'No values could be read from this graph.';
+  if (countUnreadable(graph) > 0) {
+    sentences.push('Some points could not be read and are announced as such.');
+  }
+  return sentences.join(' ');
+}
+
+/**
  * The text equivalent of the sonification, so the shape information is never
- * available only as sound.
+ * available only as sound. Only meaningful when sonification is actually in
+ * use; `describeShape` is the neutral version.
  */
 export function describeSonification(graph: GraphData, seriesIndices?: number[]): string {
   const indices = seriesIndices ?? graph.series.map((_, i) => i);
