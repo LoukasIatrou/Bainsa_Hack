@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-from typing import Literal
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, UploadFile
@@ -55,10 +54,30 @@ def extract(image: UploadFile) -> ExtractionResponse:
     return result
 
 
+def _fixture_names() -> set[str]:
+    """Scenario names that actually exist on disk."""
+    return {path.stem for path in _FIXTURES_DIR.glob("*.json")}
+
+
 @app.get("/extract/mock", response_model=ExtractionResponse)
-def extract_mock(scenario: Literal["ok", "low_confidence", "error"] = "ok") -> ExtractionResponse:
-    """Mock extraction results so Person 2/4 can build against the contract
-    without waiting on a real image or a Gemini API key."""
+def extract_mock(scenario: str = "ok") -> ExtractionResponse:
+    """Mock extraction results so Person 2/3/4 can build against the contract
+    without waiting on a real image or a Gemini API key.
+
+    Validated against the fixtures actually present rather than a hardcoded
+    list, so adding a fixture makes it servable. /reason/mock already worked
+    this way and defaults to unemployment_us, which /extract/mock rejected --
+    meaning the demo graph could be reasoned about but not extracted.
+
+    Membership in that set is also what keeps `scenario` from walking the
+    filesystem, so this is no less strict than the enum it replaces.
+    """
+    available = _fixture_names()
+    if scenario not in available:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown scenario '{scenario}'. Available: {sorted(available)}",
+        )
     fixture_path = _FIXTURES_DIR / f"{scenario}.json"
     data = json.loads(fixture_path.read_text(encoding="utf-8"))
     return ExtractionResponse(**data)
