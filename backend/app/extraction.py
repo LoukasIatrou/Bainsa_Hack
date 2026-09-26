@@ -11,8 +11,20 @@ from .schemas import ExtractionResponse, FieldConfidence, GraphData
 _DEFAULT_MODEL = "gemini-3.8-flash"
 
 
+# Tried in order when a model is overloaded ("503 high demand") or otherwise fails, so a busy
+# model on demo day costs a few seconds instead of an "extraction unavailable" error.
+_FALLBACK_MODELS = ("gemini-3.6-flash", "gemini-flash-latest")
+
+
 def _model() -> str:
     return os.getenv("GEMINI_MODEL") or _DEFAULT_MODEL
+
+
+def _models() -> list[str]:
+    chain = [_model(), *_FALLBACK_MODELS]
+    return list(dict.fromkeys(chain))  # de-duplicate, keep order
+
+
 _CONFIDENCE_THRESHOLD = 0.6
 
 _PROMPT = """You are extracting structured data from an image of a LINE GRAPH for a blind or low-vision user.
@@ -85,20 +97,25 @@ def extract_graph(image_bytes: bytes, mime_type: str) -> ExtractionResponse:
     # global has a race where a second concurrent first-call could reassign it mid-request.
     client = _client()
 
-    try:
-        response = client.models.generate_content(
-            model=_model(),
-            contents=[
-                _PROMPT,
-                types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-            ],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=_ModelOutput,
-            ),
-        )
-    except Exception as exc:  # surfaces any API/network failure as a demo-safe error status
-        print(f"extract_graph: Gemini call failed: {exc!r}")
+    response = None
+    for model in _models():
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=[
+                    _PROMPT,
+                    types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                ],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=_ModelOutput,
+                ),
+            )
+            print(f"extract_graph: answered by {model}")
+            break
+        except Exception as exc:  # busy / unavailable model: try the next one in the chain
+            print(f"extract_graph: Gemini call failed on {model}: {exc!r}")
+    if response is None:  # every model failed: demo-safe error status
         return ExtractionResponse(status="error", message="Extraction service unavailable. Try again or use a saved example.")
 
     if not response.text:
