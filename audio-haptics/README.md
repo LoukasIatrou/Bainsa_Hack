@@ -10,12 +10,12 @@ Zero runtime dependencies. TypeScript and Vite are dev-only.
 
 ## Integration (Person 4)
 
-```bash
-cd frontend && npm i file:../audio-haptics
-```
+The frontend imports this package directly from source — no npm link or build step. Vite's
+`server.fs.allow: ['..']` (in `frontend/vite.config.ts`) lets the dev server serve `../audio-haptics/src`
+straight from disk; the single import point is `frontend/src/engine/index.ts`:
 
 ```ts
-import { AudioHapticEngine } from '@bainsa/audio-haptics';
+import { AudioHapticEngine } from '../../../audio-haptics/src/index';
 
 const engine = new AudioHapticEngine();
 
